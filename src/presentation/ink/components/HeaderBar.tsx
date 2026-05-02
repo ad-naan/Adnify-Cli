@@ -10,7 +10,7 @@ import { Wordmark } from './Wordmark'
 
 export interface HeaderBarProps {
   appName: string
-  author: string
+  author?: string
   tagline: string
   workspaceName: string
   packageManager?: PackageManagerName

@@ -7,6 +7,7 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :mode agent
 - :mode plan
 - :workspace
+- :status
 - :tools
 - :doctor
 - :diff

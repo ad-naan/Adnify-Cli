@@ -48,6 +48,10 @@ export interface ApplyCliCommandResult {
 }
 
 export interface GitRunner {
+  currentBranch: (workspacePath: string) => Promise<string>
+  branchTrackingSummary: (workspacePath: string) => Promise<string>
+  statusShort: (workspacePath: string) => Promise<string>
+  lastCommitSummary: (workspacePath: string) => Promise<string>
   diffCheck: (workspacePath: string) => Promise<string>
   diffStat: (workspacePath: string) => Promise<string>
   diffPatch: (workspacePath: string) => Promise<string>
@@ -153,11 +157,91 @@ export class ApplyCliCommandUseCase {
         return persist(this.i18n.t('cli.workspace.status'))
       }
 
+      case 'status': {
+        addCommandInput()
+        const storage = (await this.storageSettings.inspect()).effectiveStorage
+        const modelConfig = command.bootstrap.modelConfig
+        const lines = [
+          this.i18n.t('cli.status.title'),
+          formatKeyValueLine('workspace', command.bootstrap.workspace.rootPath),
+          formatKeyValueLine('mode', session.mode),
+          formatKeyValueLine('model', modelConfig.model),
+          formatKeyValueLine('provider', modelConfig.provider),
+          formatKeyValueLine(
+            'configured',
+            this.i18n.t(modelConfig.apiKey ? 'common.yes' : 'common.no'),
+          ),
+          formatKeyValueLine('session', formatShortSessionId(session.id)),
+          formatKeyValueLine('storage', storage.dataRoot),
+          formatKeyValueLine(
+            'git',
+            this.i18n.t(command.bootstrap.workspace.isGitRepository ? 'common.yes' : 'common.no'),
+          ),
+        ]
+
+        if (!command.bootstrap.workspace.isGitRepository) {
+          lines.push('', this.i18n.t('cli.status.notGit'))
+          addCommandOutput(lines.join('\n'), {
+            title: this.i18n.t('transcript.command'),
+            tone: 'info',
+          })
+          return persist(this.i18n.t('cli.status.status'))
+        }
+
+        try {
+          const gitRunner = command.gitRunner ?? defaultGitRunner
+          const [branch, trackingSummary, statusShort, lastCommitSummary] = await Promise.all([
+            gitRunner.currentBranch(command.bootstrap.workspace.rootPath),
+            gitRunner.branchTrackingSummary(command.bootstrap.workspace.rootPath),
+            gitRunner.statusShort(command.bootstrap.workspace.rootPath),
+            gitRunner.lastCommitSummary(command.bootstrap.workspace.rootPath),
+          ])
+          const trimmedStatus = statusShort.trim()
+          const parsedStatus = parseGitStatusShort(trimmedStatus)
+          const tracking = parseBranchTrackingSummary(trackingSummary)
+
+          lines.push(formatKeyValueLine('branch', branch.trim() || this.i18n.t('workspace.none')))
+          if (tracking) {
+            lines.push(formatKeyValueLine('remote', formatBranchTrackingSummary(tracking, this.i18n)))
+          }
+          lines.push(
+            formatKeyValueLine(
+              'commit',
+              lastCommitSummary.trim() || this.i18n.t('cli.status.noCommits'),
+            ),
+          )
+          lines.push('')
+          lines.push(this.i18n.t('cli.status.gitChanges'))
+          lines.push(
+            trimmedStatus
+              ? formatGitStatusSummary(parsedStatus, this.i18n)
+              : this.i18n.t('cli.status.clean'),
+          )
+
+          addCommandOutput(lines.join('\n'), {
+            title: this.i18n.t('transcript.command'),
+            tone: trimmedStatus ? 'warning' : 'info',
+          })
+          return persist(this.i18n.t('cli.status.status'))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          addCommandOutput(this.i18n.t('cli.status.failed', { message }), {
+            title: this.i18n.t('transcript.command'),
+            tone: 'danger',
+          })
+          return persist(this.i18n.t('cli.status.failed', { message }))
+        }
+      }
+
       case 'tools': {
         addCommandInput()
         const toolsText = [
           this.i18n.t('cli.tools.title'),
-          ...command.bootstrap.toolCatalog.map((tool) => formatToolLine(tool, this.i18n)),
+          this.i18n.t('cli.tools.summary', {
+            count: command.bootstrap.toolCatalog.length,
+          }),
+          '',
+          ...formatToolCatalog(command.bootstrap.toolCatalog, this.i18n),
         ].join('\n')
 
         addCommandOutput(toolsText, {
@@ -180,13 +264,18 @@ export class ApplyCliCommandUseCase {
 
         try {
           const gitRunner = command.gitRunner ?? defaultGitRunner
-          const [diffCheck, diffStat] = await Promise.all([
+          const [diffCheck, diffStat, statusShort] = await Promise.all([
             gitRunner.diffCheck(command.bootstrap.workspace.rootPath),
             gitRunner.diffStat(command.bootstrap.workspace.rootPath),
+            gitRunner.statusShort(command.bootstrap.workspace.rootPath),
           ])
 
           const trimmedCheck = diffCheck.trim()
           const trimmedStat = diffStat.trim()
+          const parsedStatus = parseGitStatusShort(statusShort.trim())
+          const priorityFiles = rankPriorityReviewFiles(parsedStatus).slice(0, 5)
+          const stagedFocus = parsedStatus.staged.slice(0, 5)
+          const unstagedFocus = parsedStatus.unstaged.slice(0, 5)
 
           const reviewText = trimmedCheck
             ? [
@@ -195,8 +284,20 @@ export class ApplyCliCommandUseCase {
                 this.i18n.t('cli.review.findings'),
                 trimmedCheck,
                 '',
+                this.i18n.t('cli.review.summary'),
+                formatGitStatusCounts(parsedStatus, this.i18n),
+                '',
                 this.i18n.t('cli.review.changedFiles'),
                 trimmedStat || this.i18n.t('workspace.none'),
+                '',
+                this.i18n.t('cli.review.stagedFocus'),
+                ...formatPriorityReviewFiles(stagedFocus, this.i18n),
+                '',
+                this.i18n.t('cli.review.unstagedFocus'),
+                ...formatPriorityReviewFiles(unstagedFocus, this.i18n),
+                '',
+                this.i18n.t('cli.review.priorityFiles'),
+                ...formatPriorityReviewFiles(priorityFiles, this.i18n),
               ].join('\n')
             : trimmedStat
               ? [
@@ -204,8 +305,20 @@ export class ApplyCliCommandUseCase {
                   '',
                   this.i18n.t('cli.review.clean'),
                   '',
+                  this.i18n.t('cli.review.summary'),
+                  formatGitStatusCounts(parsedStatus, this.i18n),
+                  '',
                   this.i18n.t('cli.review.changedFiles'),
                   trimmedStat,
+                  '',
+                  this.i18n.t('cli.review.stagedFocus'),
+                  ...formatPriorityReviewFiles(stagedFocus, this.i18n),
+                  '',
+                  this.i18n.t('cli.review.unstagedFocus'),
+                  ...formatPriorityReviewFiles(unstagedFocus, this.i18n),
+                  '',
+                  this.i18n.t('cli.review.priorityFiles'),
+                  ...formatPriorityReviewFiles(priorityFiles, this.i18n),
                 ].join('\n')
               : [
                   this.i18n.t('cli.review.title'),
@@ -558,7 +671,7 @@ export class ApplyCliCommandUseCase {
         const lines =
           sessions.length > 0
             ? [
-                '#  *  id        mode    msgs  updated      title',
+                this.i18n.t('cli.sessions.columns'),
                 ...sessions.map((item, index) => formatSessionLine(item, index, session.id)),
               ]
             : [this.i18n.t('cli.sessions.empty')]
@@ -578,11 +691,11 @@ export class ApplyCliCommandUseCase {
 
       case 'resume': {
         const sessions = await this.sessionRepository.listByWorkspace(session.workspacePath, 12)
-        const target = resolveResumeTarget(args.join(' '), session.id, sessions)
+        const resumeMatch = resolveResumeTarget(args.join(' '), session.id, sessions)
 
-        if (!target) {
+        if (resumeMatch.kind !== 'matched') {
           addCommandInput()
-          addCommandOutput(this.i18n.t('cli.resume.notFound'), {
+          addCommandOutput(formatResumeFailure(resumeMatch, sessions, session.id, this.i18n), {
             title: this.i18n.t('transcript.session'),
             tone: 'warning',
           })
@@ -591,13 +704,13 @@ export class ApplyCliCommandUseCase {
 
         this.logger.info('Resumed session from local history', {
           previousSessionId: session.id,
-          nextSessionId: target.id,
+          nextSessionId: resumeMatch.session.id,
         })
 
         return {
-          session: target,
+          session: resumeMatch.session,
           statusLine: this.i18n.t('cli.resume.status', {
-            id: formatShortSessionId(target.id),
+            id: formatShortSessionId(resumeMatch.session.id),
           }),
         }
       }
@@ -641,6 +754,13 @@ export class ApplyCliCommandUseCase {
 }
 
 const defaultGitRunner: GitRunner = {
+  currentBranch: async (workspacePath) =>
+    runGitCommand(workspacePath, ['branch', '--show-current']),
+  branchTrackingSummary: async (workspacePath) =>
+    runGitCommand(workspacePath, ['status', '--short', '--branch']),
+  statusShort: async (workspacePath) => runGitCommand(workspacePath, ['status', '--short']),
+  lastCommitSummary: async (workspacePath) =>
+    runGitCommand(workspacePath, ['log', '-1', '--pretty=format:%h %s']),
   diffCheck: async (workspacePath) => runGitCommand(workspacePath, ['diff', '--check']),
   diffStat: async (workspacePath) => runGitCommand(workspacePath, ['diff', '--stat']),
   diffPatch: async (workspacePath) =>
@@ -678,7 +798,7 @@ function toDisplayCommand(commandLine: string): string {
 }
 
 function formatToolLine(tool: ToolDescriptor, i18n: AppI18n): string {
-  return `- ${localizeToolName(tool, i18n)} [${tool.category}]: ${localizeToolDescription(tool, i18n)}`
+  return `- ${localizeToolName(tool, i18n)} ${formatToolRiskBadge(tool, i18n)}: ${localizeToolDescription(tool, i18n)}`
 }
 
 function trimLargeBlock(content: string, maxLength = 12_000): string {
@@ -687,6 +807,236 @@ function trimLargeBlock(content: string, maxLength = 12_000): string {
   }
 
   return `${content.slice(0, maxLength)}\n\n... diff truncated ...`
+}
+
+function formatToolCatalog(tools: ToolDescriptor[], i18n: AppI18n): string[] {
+  const grouped = new Map<string, ToolDescriptor[]>()
+
+  for (const tool of tools) {
+    const existing = grouped.get(tool.category) ?? []
+    existing.push(tool)
+    grouped.set(tool.category, existing)
+  }
+
+  const lines: string[] = []
+  for (const [category, entries] of grouped.entries()) {
+    if (lines.length > 0) {
+      lines.push('')
+    }
+
+    lines.push(`# ${formatToolCategory(category, i18n)}`)
+    for (const tool of entries) {
+      lines.push(formatToolLine(tool, i18n))
+    }
+  }
+
+  return lines
+}
+
+function formatToolCategory(category: string, i18n: AppI18n): string {
+  return i18n.maybeT(`tool.category.${category}`) ?? category
+}
+
+function formatToolRiskBadge(tool: ToolDescriptor, i18n: AppI18n): string {
+  return `[${localizeToolRisk(tool, i18n)}]`
+}
+
+function localizeToolRisk(tool: ToolDescriptor, i18n: AppI18n): string {
+  const key = `tool.risk.${tool.riskLevel}`
+  return i18n.maybeT(key) ?? tool.riskLevel
+}
+
+interface ParsedGitStatus {
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
+}
+
+interface BranchTrackingSummary {
+  upstream: string
+  ahead: number
+  behind: number
+}
+
+function parseGitStatusShort(statusShort: string): ParsedGitStatus {
+  const parsed: ParsedGitStatus = {
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  }
+
+  for (const line of statusShort.split('\n')) {
+    if (!line) {
+      continue
+    }
+
+    const x = line[0] ?? ' '
+    const y = line[1] ?? ' '
+    const file = line.slice(3).trim()
+    if (!file) {
+      continue
+    }
+
+    if (x === '?' && y === '?') {
+      parsed.untracked.push(file)
+      continue
+    }
+
+    if (x !== ' ') {
+      parsed.staged.push(file)
+    }
+
+    if (y !== ' ') {
+      parsed.unstaged.push(file)
+    }
+  }
+
+  return parsed
+}
+
+function parseBranchTrackingSummary(statusOutput: string): BranchTrackingSummary | null {
+  const firstLine = statusOutput.split('\n')[0]?.trim() ?? ''
+  if (!firstLine.startsWith('## ')) {
+    return null
+  }
+
+  const content = firstLine.slice(3)
+  const match = content.match(/^[^.]+\.\.\.([^\s]+)(?: \[(.+)\])?$/)
+  if (!match) {
+    return null
+  }
+
+  const upstream = match[1]?.trim()
+  const details = match[2]?.trim() ?? ''
+  if (!upstream) {
+    return null
+  }
+
+  const aheadMatch = details.match(/ahead (\d+)/)
+  const behindMatch = details.match(/behind (\d+)/)
+
+  return {
+    upstream,
+    ahead: aheadMatch ? Number.parseInt(aheadMatch[1] ?? '0', 10) : 0,
+    behind: behindMatch ? Number.parseInt(behindMatch[1] ?? '0', 10) : 0,
+  }
+}
+
+function formatBranchTrackingSummary(summary: BranchTrackingSummary, i18n: AppI18n): string {
+  if (summary.ahead === 0 && summary.behind === 0) {
+    return `${summary.upstream} (${i18n.t('cli.status.upToDate')})`
+  }
+
+  const parts: string[] = []
+  if (summary.ahead > 0) {
+    parts.push(i18n.t('cli.status.aheadBy', { count: summary.ahead }))
+  }
+  if (summary.behind > 0) {
+    parts.push(i18n.t('cli.status.behindBy', { count: summary.behind }))
+  }
+
+  return `${summary.upstream} (${parts.join(', ')})`
+}
+
+function formatGitStatusSummary(parsed: ParsedGitStatus, i18n: AppI18n): string {
+  const lines: string[] = []
+  const summaryParts = buildGitStatusCountParts(parsed, i18n)
+
+  if (summaryParts.length > 0) {
+    lines.push(summaryParts.join('  '), '')
+  }
+
+  if (parsed.staged.length > 0) {
+    lines.push(i18n.t('cli.status.staged'))
+    lines.push(...parsed.staged.map((file) => `- ${file}`))
+  }
+
+  if (parsed.unstaged.length > 0) {
+    if (lines.length > 0) {
+      lines.push('')
+    }
+    lines.push(i18n.t('cli.status.unstaged'))
+    lines.push(...parsed.unstaged.map((file) => `- ${file}`))
+  }
+
+  if (parsed.untracked.length > 0) {
+    if (lines.length > 0) {
+      lines.push('')
+    }
+    lines.push(i18n.t('cli.status.untracked'))
+    lines.push(...parsed.untracked.map((file) => `- ${file}`))
+  }
+
+  return lines.join('\n') || i18n.t('cli.status.clean')
+}
+
+function formatGitStatusCounts(parsed: ParsedGitStatus, i18n: AppI18n): string {
+  const summaryParts = buildGitStatusCountParts(parsed, i18n)
+  return summaryParts.join('  ') || i18n.t('cli.status.clean')
+}
+
+function buildGitStatusCountParts(parsed: ParsedGitStatus, i18n: AppI18n): string[] {
+  const summaryParts: string[] = []
+
+  if (parsed.staged.length > 0) {
+    summaryParts.push(i18n.t('cli.status.countStaged', { count: parsed.staged.length }))
+  }
+
+  if (parsed.unstaged.length > 0) {
+    summaryParts.push(i18n.t('cli.status.countUnstaged', { count: parsed.unstaged.length }))
+  }
+
+  if (parsed.untracked.length > 0) {
+    summaryParts.push(i18n.t('cli.status.countUntracked', { count: parsed.untracked.length }))
+  }
+
+  return summaryParts
+}
+
+function rankPriorityReviewFiles(parsed: ParsedGitStatus): string[] {
+  const seen = new Set<string>()
+  const ordered = [...parsed.unstaged, ...parsed.staged, ...parsed.untracked]
+  const files: { file: string; score: number }[] = []
+
+  for (const file of ordered) {
+    if (!file || seen.has(file)) {
+      continue
+    }
+    seen.add(file)
+    files.push({ file, score: reviewPriorityScore(file, parsed) })
+  }
+
+  return files.sort((left, right) => right.score - left.score).map((item) => item.file)
+}
+
+function reviewPriorityScore(file: string, parsed: ParsedGitStatus): number {
+  let score = 0
+
+  if (parsed.unstaged.includes(file)) {
+    score += 3
+  }
+  if (parsed.staged.includes(file)) {
+    score += 2
+  }
+  if (parsed.untracked.includes(file)) {
+    score += 1
+  }
+  if (/test|spec/i.test(file)) {
+    score -= 1
+  }
+  if (/src\//i.test(file)) {
+    score += 1
+  }
+
+  return score
+}
+
+function formatPriorityReviewFiles(files: string[], i18n: AppI18n): string[] {
+  if (files.length === 0) {
+    return [i18n.t('workspace.none')]
+  }
+
+  return files.map((file) => `- ${file}`)
 }
 
 function localizeToolName(tool: ToolDescriptor, i18n: AppI18n): string {
@@ -706,30 +1056,101 @@ function formatSessionLine(
   index: number,
   currentSessionId: string,
 ): string {
-  const marker = session.id === currentSessionId ? '*' : ' '
+  const marker = session.id === currentSessionId ? '>' : ' '
   const updatedAt = session.updatedAt.toISOString().replace('T', ' ').slice(5, 16)
   const messageCount = `${session.getMessages().length}m`
 
   return `${index + 1}. ${marker} [${formatShortSessionId(session.id)}]  ${session.mode.padEnd(5, ' ')}  ${messageCount.padStart(4, ' ')}  ${updatedAt}  ${session.title}`
 }
 
+type ResumeMatchResult =
+  | { kind: 'matched'; session: ConversationSession }
+  | { kind: 'missing' }
+  | { kind: 'ambiguous'; matches: ConversationSession[] }
+
 function resolveResumeTarget(
   rawQuery: string,
   currentSessionId: string,
   sessions: ConversationSession[],
-): ConversationSession | null {
+): ResumeMatchResult {
   const query = rawQuery.trim()
+  const resumableSessions = sessions.filter((item) => item.id !== currentSessionId)
 
   if (!query) {
-    return sessions.find((item) => item.id !== currentSessionId) ?? null
+    const first = resumableSessions[0]
+    return first ? { kind: 'matched', session: first } : { kind: 'missing' }
   }
 
   const byIndex = Number.parseInt(query, 10)
   if (!Number.isNaN(byIndex) && byIndex >= 1 && byIndex <= sessions.length) {
-    return sessions[byIndex - 1] ?? null
+    const indexed = sessions[byIndex - 1]
+    if (!indexed || indexed.id === currentSessionId) {
+      return { kind: 'missing' }
+    }
+
+    return { kind: 'matched', session: indexed }
   }
 
-  return sessions.find((item) => item.id.startsWith(query)) ?? null
+  const byIdPrefix = resumableSessions.filter((item) => item.id.startsWith(query))
+  if (byIdPrefix.length === 1) {
+    return { kind: 'matched', session: byIdPrefix[0]! }
+  }
+  if (byIdPrefix.length > 1) {
+    return { kind: 'ambiguous', matches: byIdPrefix.slice(0, 5) }
+  }
+
+  const normalizedQuery = query.toLowerCase()
+  const byTitle = resumableSessions.filter((item) =>
+    item.title.toLowerCase().includes(normalizedQuery),
+  )
+  if (byTitle.length === 1) {
+    return { kind: 'matched', session: byTitle[0]! }
+  }
+  if (byTitle.length > 1) {
+    return { kind: 'ambiguous', matches: byTitle.slice(0, 5) }
+  }
+
+  return { kind: 'missing' }
+}
+
+function formatResumeFailure(
+  match: Exclude<ResumeMatchResult, { kind: 'matched' }>,
+  sessions: ConversationSession[],
+  currentSessionId: string,
+  i18n: AppI18n,
+): string {
+  if (match.kind === 'ambiguous') {
+    return [
+      i18n.t('cli.resume.ambiguous'),
+      ...match.matches.map((session, index) =>
+        formatResumeCandidateLine(session, index + 1, currentSessionId, i18n),
+      ),
+    ].join('\n')
+  }
+
+  const resumableSessions = sessions.filter((item) => item.id !== currentSessionId).slice(0, 3)
+  if (resumableSessions.length === 0) {
+    return i18n.t('cli.resume.notFound')
+  }
+
+  return [
+    i18n.t('cli.resume.notFound'),
+    '',
+    i18n.t('cli.resume.suggestions'),
+    ...resumableSessions.map((session, index) =>
+      formatResumeCandidateLine(session, index + 1, currentSessionId, i18n),
+    ),
+  ].join('\n')
+}
+
+function formatResumeCandidateLine(
+  session: ConversationSession,
+  index: number,
+  currentSessionId: string,
+  i18n: AppI18n,
+): string {
+  const marker = session.id === currentSessionId ? '>' : '-'
+  return `${index}. ${marker} [${formatShortSessionId(session.id)}] ${session.title} (${session.mode})`
 }
 
 function formatStorageSnapshot(snapshot: StorageSettingsSnapshot, i18n: AppI18n): string {

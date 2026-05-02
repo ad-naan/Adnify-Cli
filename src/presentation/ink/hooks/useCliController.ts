@@ -7,6 +7,7 @@ import type { PendingToolApproval } from '../../../application/ports/AssistantRe
 import type { ConversationSession } from '../../../domain/session/aggregates/ConversationSession'
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import type { CommandSuggestionItem } from '../components/CommandSuggestionList'
+import { formatBootErrorMessage, formatConfigErrorMessage } from './runtimeErrorFormatting'
 import { useConfigInit } from './useConfigInit'
 
 export interface UseCliControllerParams {
@@ -39,6 +40,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':mode agent': 'command.desc.mode.agent',
   ':mode plan': 'command.desc.mode.plan',
   ':workspace': 'command.desc.workspace',
+  ':status': 'command.desc.status',
   ':tools': 'command.desc.tools',
   ':doctor': 'command.desc.doctor',
   ':diff': 'command.desc.diff',
@@ -215,8 +217,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           return
         }
 
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        setStatusLine(`${i18n.t('app.boot.failed')}: ${message}`)
+        setStatusLine(formatBootErrorMessage(i18n, error))
       } finally {
         if (mounted) {
           setIsBooting(false)
@@ -456,8 +457,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           setStatusLine(result.message)
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        setStatusLine(i18n.t('status.configFailed', { message }))
+        setStatusLine(formatConfigErrorMessage(i18n, error))
       } finally {
         busyRef.current = false
         setIsBusy(false)

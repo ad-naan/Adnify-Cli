@@ -23,7 +23,51 @@ describe('LocalToolExecutor', () => {
     })
 
     expect(result.ok).toBe(false)
-    expect(result.content).toContain('Only read-only commands are allowed')
+    expect(result.content).toContain('requires explicit approval')
+  })
+
+  test('should allow approved workspace build or test commands', async () => {
+    const executor = new LocalToolExecutor(async () => ({
+      stdout: '1.3.6',
+      stderr: '',
+    }))
+
+    const result = await executor.execute({
+      toolId: 'shell-runner',
+      input: '{"argv":["bun","--version"]}',
+      workspace: createWorkspace(),
+      approvalGranted: true,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.content).toContain('1.3.6')
+  })
+
+  test('should reject non-approved workspace build or test commands', async () => {
+    const executor = new LocalToolExecutor()
+
+    const result = await executor.execute({
+      toolId: 'shell-runner',
+      input: '{"argv":["bun","--version"]}',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('requires explicit approval')
+  })
+
+  test('should keep blocking shell interpreters even after approval', async () => {
+    const executor = new LocalToolExecutor()
+
+    const result = await executor.execute({
+      toolId: 'shell-runner',
+      input: '{"argv":["powershell","-Command","Get-Date"]}',
+      workspace: createWorkspace(),
+      approvalGranted: true,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('workspace development commands')
   })
 
   test('should validate shell-runner argv payload', async () => {

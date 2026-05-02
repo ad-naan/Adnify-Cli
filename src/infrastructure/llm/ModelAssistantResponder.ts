@@ -111,6 +111,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         toolId: pendingState.approval.toolId,
         input: pendingState.approval.input,
         workspace: pendingState.workspace,
+        approvalGranted: true,
       })
 
       this.logger.info('Executed assistant tool call after approval', {

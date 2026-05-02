@@ -4,6 +4,7 @@ export interface ToolExecutionRequest {
   toolId: string
   input: string
   workspace: WorkspaceContext
+  approvalGranted?: boolean
 }
 
 export interface ToolExecutionResult {

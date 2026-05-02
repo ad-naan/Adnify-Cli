@@ -81,7 +81,6 @@ export function App(props: AppProps) {
       <Box width="100%" flexDirection="column" paddingX={1}>
         <HeaderBar
           appName="Adnify-Cli"
-          author="adnaan"
           tagline={i18n.t('assistant.tagline')}
           workspaceName={i18n.t('app.boot.workspaceName')}
           packageManager="bun"

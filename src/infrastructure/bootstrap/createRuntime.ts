@@ -16,7 +16,7 @@ import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
 import { DefaultCliConfigAdapter } from '../config/DefaultCliConfigAdapter'
 import { AiSdkGateway } from '../llm/AiSdkGateway'
 import { ModelAssistantResponder } from '../llm/ModelAssistantResponder'
-import { StubAssistantResponder } from '../llm/StubAssistantResponder'
+import { UnconfiguredAssistantResponder } from '../llm/UnconfiguredAssistantResponder'
 import { ConsoleLogger } from '../logging/ConsoleLogger'
 import { FileSessionRepository } from '../persistence/FileSessionRepository'
 import { loadPromptBundle } from '../prompt/loadPromptBundle'
@@ -149,8 +149,8 @@ function createResponderStack(
   i18n: ReturnType<typeof createAppI18n>,
 ) {
   if (!modelConfig.apiKey) {
-    logger.info('No API key configured, using stub responder')
-    return { responder: new StubAssistantResponder(logger, i18n), gateway: null }
+    logger.info('No API key configured, using unconfigured responder')
+    return { responder: new UnconfiguredAssistantResponder(logger, i18n), gateway: null }
   }
 
   logger.info('Using AI SDK gateway', {

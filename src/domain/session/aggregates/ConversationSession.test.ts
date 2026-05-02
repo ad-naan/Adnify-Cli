@@ -6,7 +6,7 @@ describe('ConversationSession', () => {
     const createdAt = new Date('2026-04-13T12:00:00.000Z')
     const session = ConversationSession.create({
       id: 'session-1',
-      title: 'demo',
+      title: 'General session',
       mode: 'agent',
       workspacePath: 'E:/26Project/Adnify-Cli',
       createdAt,
@@ -26,7 +26,7 @@ describe('ConversationSession', () => {
   test('should clear messages without losing session identity', () => {
     const session = ConversationSession.create({
       id: 'session-2',
-      title: 'demo',
+      title: 'Chat session',
       mode: 'chat',
       workspacePath: 'E:/26Project/Adnify-Cli',
       createdAt: new Date('2026-04-13T12:00:00.000Z'),
@@ -43,7 +43,7 @@ describe('ConversationSession', () => {
     const createdAt = new Date('2026-04-13T12:00:00.000Z')
     const session = ConversationSession.create({
       id: 'session-3',
-      title: 'demo',
+      title: 'Rename session',
       mode: 'agent',
       workspacePath: 'E:/26Project/Adnify-Cli',
       createdAt,

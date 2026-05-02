@@ -11,6 +11,8 @@ import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
 const execFileAsync = promisify(execFile)
 const DEFAULT_SEARCH_LIMIT = 8
 const DEFAULT_GLOB_LIMIT = 20
+const DEFAULT_SHELL_TIMEOUT_MS = 30_000
+const MAX_SHELL_TIMEOUT_MS = 120_000
 const MAX_SCAN_FILES = 200
 const MAX_DIRECTORY_ENTRIES = 40
 const MAX_FILE_READ_CHARS = 12_000
@@ -51,7 +53,23 @@ const ALLOWED_TEXT_FILENAMES = new Set([
   '.rules',
 ])
 
+type ExecRunner = (
+  file: string,
+  args?: readonly string[] | null,
+  options?: {
+    cwd?: string
+    windowsHide?: boolean
+    maxBuffer?: number
+    timeout?: number
+  },
+) => Promise<{
+  stdout: string
+  stderr: string
+}>
+
 export class LocalToolExecutor implements ToolExecutorPort {
+  constructor(private readonly execRunner: ExecRunner = execFileAsync) {}
+
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
     switch (request.toolId) {
       case 'workspace-read':
@@ -442,6 +460,10 @@ export class LocalToolExecutor implements ToolExecutorPort {
     const argv = Array.isArray(prompt.argv)
       ? prompt.argv.filter((value): value is string => typeof value === 'string' && value.length > 0)
       : []
+    const timeoutMs =
+      typeof prompt.timeoutMs === 'number' && Number.isFinite(prompt.timeoutMs)
+        ? Math.max(1_000, Math.min(MAX_SHELL_TIMEOUT_MS, Math.trunc(prompt.timeoutMs)))
+        : DEFAULT_SHELL_TIMEOUT_MS
 
     if (argv.length === 0) {
       return {
@@ -452,7 +474,7 @@ export class LocalToolExecutor implements ToolExecutorPort {
       }
     }
 
-    const validation = validateReadonlyCommand(argv)
+    const validation = validateShellCommand(argv, request.approvalGranted === true)
     if (!validation.ok) {
       return {
         toolId: request.toolId,
@@ -462,10 +484,11 @@ export class LocalToolExecutor implements ToolExecutorPort {
     }
 
     try {
-      const { stdout, stderr } = await execFileAsync(argv[0]!, argv.slice(1), {
+      const { stdout, stderr } = await this.execRunner(argv[0]!, argv.slice(1), {
         cwd: request.workspace.rootPath,
         windowsHide: true,
         maxBuffer: 1024 * 1024,
+        timeout: timeoutMs,
       })
 
       const output = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n')
@@ -633,7 +656,7 @@ export class LocalToolExecutor implements ToolExecutorPort {
     limit: number,
   ): Promise<string | null> {
     try {
-      const { stdout } = await execFileAsync(
+      const { stdout } = await this.execRunner(
         'rg',
         ['--line-number', '--no-heading', '--color', 'never', '--max-count', String(limit), query, '.'],
         { cwd: rootPath, windowsHide: true, maxBuffer: 1024 * 1024 },
@@ -658,7 +681,7 @@ export class LocalToolExecutor implements ToolExecutorPort {
         args.push(relativeBase)
       }
 
-      const { stdout } = await execFileAsync('rg', args, {
+      const { stdout } = await this.execRunner('rg', args, {
         cwd: rootPath,
         windowsHide: true,
         maxBuffer: 1024 * 1024,
@@ -876,36 +899,85 @@ function countOccurrences(content: string, search: string): number {
   return count
 }
 
-function validateReadonlyCommand(
+function validateShellCommand(
   argv: string[],
+  approvalGranted: boolean,
 ): { ok: true } | { ok: false; reason: string } {
   const command = argv[0]?.toLowerCase()
   if (!command) {
     return { ok: false, reason: 'Missing command name.' }
   }
 
-  if (command === 'rg') {
+  if (isReadonlyShellCommand(argv)) {
     return { ok: true }
   }
 
-  if (command === 'git') {
-    const subcommand = argv[1]?.toLowerCase()
-    const allowed = new Set(['status', 'diff', 'log', 'show', 'branch', 'rev-parse'])
-    if (!subcommand || !allowed.has(subcommand)) {
-      return {
-        ok: false,
-        reason:
-          'Only read-only git commands are allowed: status, diff, log, show, branch, rev-parse.',
-      }
+  if (!approvalGranted) {
+    return {
+      ok: false,
+      reason:
+        'This shell command requires explicit approval before execution. Without approval, only read-only commands are allowed: rg, git status/diff/log/show/branch/rev-parse.',
     }
-
-    return { ok: true }
   }
 
-  return {
-    ok: false,
-    reason: 'Only read-only commands are allowed in this build. Supported: rg, git status/diff/log/show/branch/rev-parse.',
+  if (isBlockedApprovedShellCommand(command)) {
+    return {
+      ok: false,
+      reason:
+        'Approved shell execution does not allow launching nested shell interpreters. Use workspace development commands directly: bun, bunx, npm, npx, node, git, rg.',
+    }
   }
+
+  if (!isApprovedShellExecutable(command)) {
+    return {
+      ok: false,
+      reason:
+        'Approved shell execution is limited to workspace development commands: bun, bunx, npm, npx, node, git, rg.',
+    }
+  }
+
+  return { ok: true }
+}
+
+function isReadonlyShellCommand(argv: string[]): boolean {
+  const command = argv[0]?.toLowerCase()
+  if (!command) {
+    return false
+  }
+
+  if (command === 'rg') {
+    return true
+  }
+
+  if (command !== 'git') {
+    return false
+  }
+
+  const subcommand = argv[1]?.toLowerCase()
+  const allowed = new Set(['status', 'diff', 'log', 'show', 'branch', 'rev-parse'])
+  return Boolean(subcommand && allowed.has(subcommand))
+}
+
+function isApprovedShellExecutable(command: string): boolean {
+  return (
+    command === 'bun' ||
+    command === 'bunx' ||
+    command === 'npm' ||
+    command === 'npx' ||
+    command === 'node' ||
+    command === 'git' ||
+    command === 'rg'
+  )
+}
+
+function isBlockedApprovedShellCommand(command: string): boolean {
+  return (
+    command === 'cmd' ||
+    command === 'powershell' ||
+    command === 'pwsh' ||
+    command === 'sh' ||
+    command === 'bash'
+  )
 }
 
 function isHttpUrl(value: string): boolean {

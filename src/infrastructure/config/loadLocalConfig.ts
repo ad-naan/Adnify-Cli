@@ -44,6 +44,11 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
   timeoutMs: 60_000,
 }
 
+export interface LoadLocalConfigOptions {
+  env?: Record<string, string | undefined>
+  configPath?: string
+}
+
 function parseProvider(value: string | undefined): ModelProvider {
   if (value && VALID_PROVIDERS.has(value as ModelProvider)) {
     return value as ModelProvider
@@ -52,34 +57,47 @@ function parseProvider(value: string | undefined): ModelProvider {
   return 'openai-compatible'
 }
 
-async function readConfigFile(): Promise<RawConfigFile> {
-  const storage = await resolveAppStorage()
+async function readConfigFile(options: LoadLocalConfigOptions = {}): Promise<RawConfigFile> {
+  const storage = options.configPath
+    ? { configPath: options.configPath }
+    : await resolveAppStorage({ env: options.env })
 
   try {
     const raw = await readFile(storage.configPath, 'utf-8')
     return JSON.parse(raw) as RawConfigFile
-  } catch {
-    return {}
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {}
+    }
+
+    if (error instanceof SyntaxError) {
+      throw new Error(`Invalid JSON in config file: ${storage.configPath}`)
+    }
+
+    throw error instanceof Error
+      ? new Error(`Failed to read config file ${storage.configPath}: ${error.message}`)
+      : new Error(`Failed to read config file ${storage.configPath}: ${String(error)}`)
   }
 }
 
-export async function loadModelConfig(): Promise<ModelConfig> {
-  const fileConfig = await readConfigFile()
+export async function loadModelConfig(options: LoadLocalConfigOptions = {}): Promise<ModelConfig> {
+  const fileConfig = await readConfigFile(options)
   const model = fileConfig.model ?? {}
+  const env = options.env ?? process.env
 
   return {
-    provider: parseProvider(process.env['ADNIFY_PROVIDER'] ?? model.provider),
-    apiKey: process.env['ADNIFY_API_KEY'] ?? model.apiKey ?? DEFAULT_MODEL_CONFIG.apiKey,
-    baseUrl: process.env['ADNIFY_BASE_URL'] ?? model.baseUrl ?? DEFAULT_MODEL_CONFIG.baseUrl,
-    model: process.env['ADNIFY_MODEL'] ?? model.model ?? DEFAULT_MODEL_CONFIG.model,
+    provider: parseProvider(env['ADNIFY_PROVIDER'] ?? model.provider),
+    apiKey: env['ADNIFY_API_KEY'] ?? model.apiKey ?? DEFAULT_MODEL_CONFIG.apiKey,
+    baseUrl: env['ADNIFY_BASE_URL'] ?? model.baseUrl ?? DEFAULT_MODEL_CONFIG.baseUrl,
+    model: env['ADNIFY_MODEL'] ?? model.model ?? DEFAULT_MODEL_CONFIG.model,
     maxTokens: model.maxTokens ?? DEFAULT_MODEL_CONFIG.maxTokens,
     temperature: model.temperature ?? DEFAULT_MODEL_CONFIG.temperature,
     timeoutMs: model.timeoutMs ?? DEFAULT_MODEL_CONFIG.timeoutMs,
   }
 }
 
-export async function loadProviders(): Promise<ProvidersMap> {
-  const fileConfig = await readConfigFile()
+export async function loadProviders(options: LoadLocalConfigOptions = {}): Promise<ProvidersMap> {
+  const fileConfig = await readConfigFile(options)
   const raw = fileConfig.providers ?? {}
   const result: ProvidersMap = {}
 
@@ -95,4 +113,13 @@ export async function loadProviders(): Promise<ProvidersMap> {
   }
 
   return result
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  )
 }

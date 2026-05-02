@@ -66,7 +66,7 @@ function createMockStorageSettings(): StorageSettingsPort {
   return {
     inspect: async () => ({
       effectiveStorage,
-      settingsPath: 'E:/Users/adnaan/AppData/Roaming/Adnify-Cli/settings.json',
+      settingsPath: 'E:/Users/tester/AppData/Roaming/Adnify-Cli/settings.json',
       configuredDataRoot,
     }),
     setDataDirectory: async (path) => {
@@ -81,7 +81,7 @@ function createMockStorageSettings(): StorageSettingsPort {
 
       return {
         effectiveStorage,
-        settingsPath: 'E:/Users/adnaan/AppData/Roaming/Adnify-Cli/settings.json',
+        settingsPath: 'E:/Users/tester/AppData/Roaming/Adnify-Cli/settings.json',
         configuredDataRoot,
         migratedConfig: true,
         migratedSessions: true,
@@ -91,16 +91,16 @@ function createMockStorageSettings(): StorageSettingsPort {
     resetDataDirectory: async () => {
       configuredDataRoot = null
       effectiveStorage = {
-        dataRoot: 'C:/Users/adnaan/AppData/Local/Adnify-Cli',
-        configPath: 'C:/Users/adnaan/AppData/Local/Adnify-Cli/config.json',
-        sessionsDir: 'C:/Users/adnaan/AppData/Local/Adnify-Cli/sessions',
+        dataRoot: 'C:/Users/tester/AppData/Local/Adnify-Cli',
+        configPath: 'C:/Users/tester/AppData/Local/Adnify-Cli/config.json',
+        sessionsDir: 'C:/Users/tester/AppData/Local/Adnify-Cli/sessions',
         source: 'default',
         isCustom: false,
       }
 
       return {
         effectiveStorage,
-        settingsPath: 'E:/Users/adnaan/AppData/Roaming/Adnify-Cli/settings.json',
+        settingsPath: 'E:/Users/tester/AppData/Roaming/Adnify-Cli/settings.json',
         configuredDataRoot,
         migratedConfig: false,
         migratedSessions: false,
@@ -126,7 +126,7 @@ function createBootstrapSnapshot(): BootstrapSnapshot {
     profile: new AssistantProfile({
       id: 'adnify',
       name: 'Adnify-Cli',
-      author: 'adnaan',
+      author: 'Adnify Team',
       tagline: 'test',
       description: 'test',
       defaultMode: 'agent',
@@ -175,6 +175,7 @@ function createBootstrapSnapshot(): BootstrapSnapshot {
       ':help',
       ':mode chat',
       ':workspace',
+      ':status',
       ':tools',
       ':doctor',
       ':diff',
@@ -235,6 +236,60 @@ describe('ApplyCliCommandUseCase', () => {
     const output = parseCliTranscriptMarkup(messages[1]?.content ?? '')
     expect(output?.kind).toBe('command-output')
     expect(output?.content).toContain(':resume [index|id]')
+  })
+
+  test('should group tools by category and show risk labels', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-tools',
+      title: 'tools',
+      mode: 'agent',
+      workspacePath: 'E:/26Project/Adnify-Cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:01:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const bootstrap = createBootstrapSnapshot()
+    bootstrap.toolCatalog = [
+      new ToolDescriptor({
+        id: 'workspace-read',
+        name: 'Workspace Read',
+        description: 'read workspace context',
+        category: 'workspace',
+        riskLevel: 'safe',
+      }),
+      new ToolDescriptor({
+        id: 'shell-runner',
+        name: 'Shell Runner',
+        description: 'run shell commands',
+        category: 'execution',
+        riskLevel: 'careful',
+      }),
+    ]
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':tools',
+      bootstrap,
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('2 tools available')
+    expect(output?.content).toContain('# Workspace')
+    expect(output?.content).toContain('# Execution')
+    expect(output?.content).toContain('Workspace Read [safe]')
+    expect(output?.content).toContain('Shell Runner [careful]')
   })
 
   test('should clear existing conversation before appending clear transcript', async () => {
@@ -371,6 +426,150 @@ describe('ApplyCliCommandUseCase', () => {
     expect(result.statusLine).toContain('Resumed session')
   })
 
+  test('should resume a session by title keyword', async () => {
+    const repo = createMockSessionRepo()
+    const workspacePath = 'E:/26Project/Adnify-Cli'
+
+    const current = ConversationSession.create({
+      id: 'sess-current',
+      title: 'Current session',
+      mode: 'agent',
+      workspacePath,
+      createdAt: new Date('2026-01-01T00:10:00.000Z'),
+    })
+
+    const previous = ConversationSession.create({
+      id: 'sess-auth-fix',
+      title: 'Fix auth flow',
+      mode: 'plan',
+      workspacePath,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    await repo.save(current)
+    await repo.save(previous)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:12:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: current.id,
+      commandLine: ':resume auth',
+      bootstrap: createBootstrapSnapshot(),
+    })
+
+    expect(result.session.id).toBe('sess-auth-fix')
+    expect(result.statusLine).toContain('Resumed session')
+  })
+
+  test('should show matching resume suggestions when session is not found', async () => {
+    const repo = createMockSessionRepo()
+    const workspacePath = 'E:/26Project/Adnify-Cli'
+
+    const current = ConversationSession.create({
+      id: 'sess-current',
+      title: 'Current session',
+      mode: 'agent',
+      workspacePath,
+      createdAt: new Date('2026-01-01T00:10:00.000Z'),
+    })
+
+    const previous = ConversationSession.create({
+      id: 'sess-restore',
+      title: 'Restore me',
+      mode: 'chat',
+      workspacePath,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    await repo.save(current)
+    await repo.save(previous)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:12:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: current.id,
+      commandLine: ':resume missing',
+      bootstrap: createBootstrapSnapshot(),
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('Session not found.')
+    expect(output?.content).toContain('You can try one of these:')
+    expect(output?.content).toContain('Restore me')
+  })
+
+  test('should show ambiguous resume matches when multiple sessions match the query', async () => {
+    const repo = createMockSessionRepo()
+    const workspacePath = 'E:/26Project/Adnify-Cli'
+
+    const current = ConversationSession.create({
+      id: 'sess-current',
+      title: 'Current session',
+      mode: 'agent',
+      workspacePath,
+      createdAt: new Date('2026-01-01T00:10:00.000Z'),
+    })
+
+    const one = ConversationSession.create({
+      id: 'sess-auth-1',
+      title: 'Fix auth flow',
+      mode: 'plan',
+      workspacePath,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    const two = ConversationSession.create({
+      id: 'sess-auth-2',
+      title: 'Auth retry bug',
+      mode: 'chat',
+      workspacePath,
+      createdAt: new Date('2026-01-01T00:01:00.000Z'),
+    })
+
+    await repo.save(current)
+    await repo.save(one)
+    await repo.save(two)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:12:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: current.id,
+      commandLine: ':resume auth',
+      bootstrap: createBootstrapSnapshot(),
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('Multiple sessions matched that query.')
+    expect(output?.content).toContain('Fix auth flow')
+    expect(output?.content).toContain('Auth retry bug')
+  })
+
   test('should save a custom storage directory', async () => {
     const repo = createMockSessionRepo()
     const session = ConversationSession.create({
@@ -403,6 +602,61 @@ describe('ApplyCliCommandUseCase', () => {
     expect(output?.content).toContain('Saved a new storage directory')
     expect(output?.content).toContain('D:/AdnifyData')
     expect(result.statusLine).toContain('storage directory')
+  })
+
+  test('should show current runtime and git status summary', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-status',
+      title: 'Status',
+      mode: 'agent',
+      workspacePath: 'E:/26Project/Adnify-Cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:04:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':status',
+      bootstrap: createBootstrapSnapshot(),
+      gitRunner: {
+        currentBranch: async () => 'main',
+        branchTrackingSummary: async () =>
+          '## main...origin/main [ahead 2, behind 1]\nM  src/staged.ts\n M src/main.ts',
+        statusShort: async () =>
+          'M  src/staged.ts\n M src/main.ts\nMM src/both.ts\n?? prompts/tools/web-search.md',
+        lastCommitSummary: async () => 'e8a0cd9 Add CLI tool approval flow and parity commands',
+        diffCheck: async () => '',
+        diffStat: async () => '',
+        diffPatch: async () => '',
+      },
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('Current status:')
+    expect(output?.content).toContain('main')
+    expect(output?.content).toContain('origin/main (ahead by 2, behind by 1)')
+    expect(output?.content).toContain('e8a0cd9 Add CLI tool approval flow and parity commands')
+    expect(output?.content).toContain('2 staged  2 unstaged  1 untracked')
+    expect(output?.content).toContain('Staged changes:')
+    expect(output?.content).toContain('src/staged.ts')
+    expect(output?.content).toContain('src/both.ts')
+    expect(output?.content).toContain('Unstaged changes:')
+    expect(output?.content).toContain('src/main.ts')
+    expect(output?.content).toContain('Untracked files:')
+    expect(output?.content).toContain('prompts/tools/web-search.md')
+    expect(result.statusLine).toContain('Displayed current status')
   })
 
   test('should display current session details', async () => {
@@ -466,6 +720,10 @@ describe('ApplyCliCommandUseCase', () => {
       commandLine: ':review',
       bootstrap: createBootstrapSnapshot(),
       gitRunner: {
+        currentBranch: async () => '',
+        branchTrackingSummary: async () => '',
+        statusShort: async () => ' M src/main.ts\nM  src/worker.ts\n?? src/new-file.ts',
+        lastCommitSummary: async () => '',
         diffCheck: async () => 'src/main.ts:12: trailing whitespace.',
         diffStat: async () => ' src/main.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)',
         diffPatch: async () => '',
@@ -476,7 +734,15 @@ describe('ApplyCliCommandUseCase', () => {
     expect(output?.kind).toBe('command-output')
     expect(output?.content).toContain('Findings:')
     expect(output?.content).toContain('trailing whitespace')
+    expect(output?.content).toContain('Review summary:')
+    expect(output?.content).toContain('2 staged  1 untracked')
     expect(output?.content).toContain('Changed files:')
+    expect(output?.content).toContain('Staged focus:')
+    expect(output?.content).toContain('src/worker.ts')
+    expect(output?.content).toContain('Unstaged focus:')
+    expect(output?.content).toContain('none')
+    expect(output?.content).toContain('Suggested files to inspect first:')
+    expect(output?.content).toContain('src/main.ts')
     expect(result.statusLine).toContain('Reviewed the current diff')
   })
 
@@ -542,6 +808,10 @@ describe('ApplyCliCommandUseCase', () => {
       commandLine: ':diff',
       bootstrap: createBootstrapSnapshot(),
       gitRunner: {
+        currentBranch: async () => '',
+        branchTrackingSummary: async () => '',
+        statusShort: async () => '',
+        lastCommitSummary: async () => '',
         diffCheck: async () => '',
         diffStat: async () => '',
         diffPatch: async () =>
@@ -583,6 +853,10 @@ describe('ApplyCliCommandUseCase', () => {
       commandLine: ':diff',
       bootstrap: createBootstrapSnapshot(),
       gitRunner: {
+        currentBranch: async () => '',
+        branchTrackingSummary: async () => '',
+        statusShort: async () => '',
+        lastCommitSummary: async () => '',
         diffCheck: async () => '',
         diffStat: async () => '',
         diffPatch: async () => '',

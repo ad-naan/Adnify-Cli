@@ -1,7 +1,7 @@
 ---
 id: adnify-cli
 name: Adnify-Cli
-author: adnaan
+author: Adnify Team
 tagline: Command your codebase with calm precision.
 defaultMode: agent
 ---

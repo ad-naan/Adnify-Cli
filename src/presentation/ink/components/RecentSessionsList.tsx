@@ -25,6 +25,7 @@ function resolveModeColor(mode: SessionListItem['mode']): string {
 
 function StackedItem(props: { session: SessionListItem; isCurrent: boolean }) {
   const shortId = props.session.id.slice(0, 8)
+  const relativeTime = formatRelativeSessionTime(props.session.updatedAt)
 
   return (
     <Box justifyContent="space-between" gap={1}>
@@ -41,6 +42,7 @@ function StackedItem(props: { session: SessionListItem; isCurrent: boolean }) {
         </Text>
       </Box>
       <Box gap={1} flexShrink={0}>
+        <Text color={adnifyTheme.textDim}>{relativeTime}</Text>
         <Text color={resolveModeColor(props.session.mode)}>{props.session.mode}</Text>
         <Text color={adnifyTheme.textDim}>{props.session.messageCount}m</Text>
       </Box>
@@ -50,6 +52,7 @@ function StackedItem(props: { session: SessionListItem; isCurrent: boolean }) {
 
 function InlineItem(props: { session: SessionListItem; isCurrent: boolean }) {
   const shortId = props.session.id.slice(0, 8)
+  const relativeTime = formatRelativeSessionTime(props.session.updatedAt)
 
   return (
     <Text backgroundColor={props.isCurrent ? adnifyTheme.backgroundHint : undefined}>
@@ -62,8 +65,35 @@ function InlineItem(props: { session: SessionListItem; isCurrent: boolean }) {
       </Text>
       <Text color={adnifyTheme.textDim}> </Text>
       <Text color={resolveModeColor(props.session.mode)}>{props.session.mode}</Text>
+      <Text color={adnifyTheme.textDim}> {relativeTime}</Text>
     </Text>
   )
+}
+
+function formatRelativeSessionTime(updatedAt: string): string {
+  const time = new Date(updatedAt).getTime()
+  if (!Number.isFinite(time)) {
+    return ''
+  }
+
+  const diffMs = Date.now() - time
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60_000))
+
+  if (diffMinutes < 1) {
+    return 'now'
+  }
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m`
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) {
+    return `${diffHours}h`
+  }
+
+  const diffDays = Math.floor(diffHours / 24)
+  return `${diffDays}d`
 }
 
 export const RecentSessionsList = memo(function RecentSessionsList(props: RecentSessionsListProps) {

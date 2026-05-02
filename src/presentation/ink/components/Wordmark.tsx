@@ -6,7 +6,7 @@ import { MascotGlyph } from './MascotGlyph'
 
 export interface WordmarkProps {
   appName: string
-  author: string
+  author?: string
   tagline: string
   busy?: boolean
   animateMascot?: boolean
@@ -22,9 +22,11 @@ export const Wordmark = memo(function Wordmark(props: WordmarkProps) {
           <Text color={adnifyTheme.brandSoft} bold>
             {props.appName}
           </Text>
-          <Text color={adnifyTheme.textDim}>
-            {props.i18n.t('common.by')} {props.author}
-          </Text>
+          {props.author ? (
+            <Text color={adnifyTheme.textDim}>
+              {props.i18n.t('common.by')} {props.author}
+            </Text>
+          ) : null}
         </Box>
         <Text color={adnifyTheme.textSecondary}>{props.tagline}</Text>
       </Box>

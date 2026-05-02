@@ -40,6 +40,7 @@ Adnify-Cli 想做的不是“一个能聊天的 CLI”，而是“一个真正�
 - 支持会话文件化持久化。
 - 支持按工作区自动恢复最近会话。
 - 支持 `:session / :sessions / :resume` 会话管理命令。
+- 支持 `:status / :doctor / :diff / :review` 运行状态与代码检查命令。
 - 支持 `:config` 系列命令进行模型配置。
 - 支持 `:storage` 系列命令管理数据目录。
 - 支持运行时切换模型配置。
@@ -197,7 +198,7 @@ Linux：
 
 - `:session`
 - `:sessions`
-- `:resume [index|id]`
+- `:resume [index|id]`（也支持标题关键词匹配）
 - `:clear`
 
 ## 本地命令
@@ -209,7 +210,11 @@ Linux：
 - `:mode agent`
 - `:mode plan`
 - `:workspace`
-- `:tools`
+- `:status`（查看当前模式、模型、分支、远端同步状态、最近提交与工作区变更概览）
+- `:tools`（按类别展示工具目录，并标记风险级别）
+- `:doctor`
+- `:diff`
+- `:review`（展示审查摘要、重点变更与建议优先查看文件）
 - `:model [provider] [model]`
 - `:config`
 - `:config init`
@@ -220,7 +225,7 @@ Linux：
 - `:config clear api-key`
 - `:session`
 - `:sessions`
-- `:resume [index|id]`
+- `:resume [index|id]`（也支持标题关键词匹配）
 - `:storage`
 - `:storage set [path]`
 - `:storage reset`
@@ -296,23 +301,23 @@ Ink UI、交互控制器、终端布局、输入处理和视图组件。
 
 如果按里程碑粗略划分：
 
-- `M1` 会话持久化与启动恢复：基本完成
-- `M2` 工具调用与 Agent 能力：基础骨架已在，核心能力待接入
-- `M3` 多轮工具执行与完整协作链路：待继续开发
+- `M1` 会话持久化与启动恢复：已完成
+- `M2` 本地命令、配置管理、工具审批与基础工具链：已基本完成
+- `M3` 多轮 Agent 编排、更多生产级工具能力与完整协作闭环：仍在推进
 
 ## 下一阶段重点
 
 接下来更值得继续推进的方向：
 
-- 真正接入工具执行链与 Agent 多轮编排
-- 继续优化会话区、sessions 列表和命令视窗的展示逻辑
-- 清理国际化文本编码问题
-- 补足更完整的存储设置说明与体验
-- 为后续插件、记忆和权限策略预留扩展点
+- 继续扩展生产级工具能力，补齐与 `cc/` 对照下仍缺失的高级能力
+- 推进多轮 Agent 编排、任务拆分和更完整的协作执行链路
+- 继续清理国际化文本与文档一致性问题
+- 补足更完整的存储、配置异常与故障排查体验
+- 为后续插件、记忆和权限策略预留稳定扩展点
 
 ## 项目信息
 
 - Project: `Adnify-Cli`
-- Author: `adnaan`
+- Maintainer: `Adnify Team`
 - Package Manager: `bun`
 - Terminal UI: `Ink`
