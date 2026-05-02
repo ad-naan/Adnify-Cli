@@ -10,10 +10,13 @@ import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_SEARCH_LIMIT = 8
+const DEFAULT_GLOB_LIMIT = 20
 const MAX_SCAN_FILES = 200
 const MAX_DIRECTORY_ENTRIES = 40
 const MAX_FILE_READ_CHARS = 12_000
 const MAX_FILE_WRITE_CHARS = 80_000
+const MAX_WEB_FETCH_CHARS = 20_000
+const DEFAULT_WEB_SEARCH_LIMIT = 5
 const TEXT_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
@@ -55,10 +58,16 @@ export class LocalToolExecutor implements ToolExecutorPort {
         return this.executeWorkspaceRead(request)
       case 'search-index':
         return this.executeSearchIndex(request)
+      case 'glob-search':
+        return this.executeGlobSearch(request)
       case 'file-ops':
         return this.executeFileOps(request)
       case 'shell-runner':
         return this.executeShellRunner(request)
+      case 'web-fetch':
+        return this.executeWebFetch(request)
+      case 'web-search':
+        return this.executeWebSearch(request)
       default:
         return {
           toolId: request.toolId,
@@ -117,6 +126,60 @@ export class LocalToolExecutor implements ToolExecutorPort {
       toolId: request.toolId,
       ok: true,
       content: await this.fallbackSearch(request.workspace.rootPath, query, limit),
+    }
+  }
+
+  private async executeGlobSearch(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    const prompt = parseJsonObject(request.input)
+    const pattern = typeof prompt.pattern === 'string' ? prompt.pattern.trim() : ''
+    const rawPath = typeof prompt.path === 'string' ? prompt.path.trim() : '.'
+    const limit =
+      typeof prompt.limit === 'number' && Number.isFinite(prompt.limit)
+        ? Math.max(1, Math.min(100, Math.trunc(prompt.limit)))
+        : DEFAULT_GLOB_LIMIT
+
+    if (!pattern) {
+      return {
+        toolId: request.toolId,
+        ok: false,
+        content: 'Missing required field "pattern". Example: {"pattern":"src/**/*.ts"}',
+      }
+    }
+
+    const resolvedPath = resolveWorkspacePath(request.workspace.rootPath, rawPath)
+    if (!resolvedPath) {
+      return {
+        toolId: request.toolId,
+        ok: false,
+        content: 'Path must stay inside the current workspace.',
+      }
+    }
+
+    const relativeBase = relative(request.workspace.rootPath, resolvedPath) || '.'
+
+    const rgResult = await this.tryRipgrepGlob(request.workspace.rootPath, relativeBase, pattern, limit)
+    const matches =
+      rgResult && rgResult.length > 0
+        ? rgResult
+        : await this.fallbackGlobSearch(request.workspace.rootPath, resolvedPath, pattern, limit)
+
+    if (matches.length === 0) {
+      return {
+        toolId: request.toolId,
+        ok: true,
+        content: `Pattern: ${pattern}\nBase: ${relativeBase}\nNo matches found.`,
+      }
+    }
+
+    return {
+      toolId: request.toolId,
+      ok: true,
+      content: [
+        `Pattern: ${pattern}`,
+        `Base: ${relativeBase}`,
+        '',
+        ...matches,
+      ].join('\n'),
     }
   }
 
@@ -422,6 +485,148 @@ export class LocalToolExecutor implements ToolExecutorPort {
     }
   }
 
+  private async executeWebFetch(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    const prompt = parseJsonObject(request.input)
+    const url = typeof prompt.url === 'string' ? prompt.url.trim() : ''
+
+    if (!url) {
+      return {
+        toolId: request.toolId,
+        ok: false,
+        content: 'Missing required field "url". Example: {"url":"https://example.com/docs"}',
+      }
+    }
+
+    if (!isHttpUrl(url)) {
+      return {
+        toolId: request.toolId,
+        ok: false,
+        content: 'Only http and https URLs are supported.',
+      }
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'user-agent': 'Adnify-Cli/0.1',
+          accept: 'text/plain,text/markdown,text/html,application/json;q=0.9,*/*;q=0.1',
+        },
+      })
+
+      if (!response.ok) {
+        return {
+          toolId: request.toolId,
+          ok: false,
+          content: `Request failed with status ${response.status} ${response.statusText}.`,
+        }
+      }
+
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+      if (
+        contentType &&
+        !contentType.includes('text/') &&
+        !contentType.includes('json') &&
+        !contentType.includes('xml') &&
+        !contentType.includes('javascript')
+      ) {
+        return {
+          toolId: request.toolId,
+          ok: false,
+          content: `Unsupported content type: ${contentType}. Only text-like responses are supported.`,
+        }
+      }
+
+      const rawContent = await response.text()
+      const content = rawContent.length > MAX_WEB_FETCH_CHARS
+        ? `${rawContent.slice(0, MAX_WEB_FETCH_CHARS)}\n\n[truncated]`
+        : rawContent
+
+      return {
+        toolId: request.toolId,
+        ok: true,
+        content: [
+          `URL: ${url}`,
+          `Content-Type: ${contentType || 'unknown'}`,
+          '',
+          content,
+        ].join('\n'),
+      }
+    } catch (error) {
+      return {
+        toolId: request.toolId,
+        ok: false,
+        content: error instanceof Error ? error.message : 'Web fetch failed.',
+      }
+    }
+  }
+
+  private async executeWebSearch(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    const prompt = parseJsonObject(request.input)
+    const query = typeof prompt.query === 'string' ? prompt.query.trim() : ''
+    const domain = typeof prompt.domain === 'string' ? prompt.domain.trim() : ''
+    const limit =
+      typeof prompt.limit === 'number' && Number.isFinite(prompt.limit)
+        ? Math.max(1, Math.min(10, Math.trunc(prompt.limit)))
+        : DEFAULT_WEB_SEARCH_LIMIT
+
+    if (!query) {
+      return {
+        toolId: request.toolId,
+        ok: false,
+        content: 'Missing required field "query". Example: {"query":"Ink React terminal UI"}',
+      }
+    }
+
+    const effectiveQuery = domain ? `${query} site:${domain}` : query
+    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(effectiveQuery)}`
+
+    try {
+      const response = await fetch(searchUrl, {
+        headers: {
+          'user-agent': 'Adnify-Cli/0.1',
+          accept: 'text/html,application/xhtml+xml',
+        },
+      })
+
+      if (!response.ok) {
+        return {
+          toolId: request.toolId,
+          ok: false,
+          content: `Request failed with status ${response.status} ${response.statusText}.`,
+        }
+      }
+
+      const html = await response.text()
+      const results = extractDuckDuckGoResults(html, limit)
+
+      if (results.length === 0) {
+        return {
+          toolId: request.toolId,
+          ok: true,
+          content: `Query: ${effectiveQuery}\nNo results found.`,
+        }
+      }
+
+      return {
+        toolId: request.toolId,
+        ok: true,
+        content: [
+          `Query: ${effectiveQuery}`,
+          '',
+          ...results.map((result, index) =>
+            `${index + 1}. ${result.title}\n${result.url}${result.snippet ? `\n${result.snippet}` : ''}`,
+          ),
+        ].join('\n\n'),
+      }
+    } catch (error) {
+      return {
+        toolId: request.toolId,
+        ok: false,
+        content: error instanceof Error ? error.message : 'Web search failed.',
+      }
+    }
+  }
+
   private async tryRipgrepSearch(
     rootPath: string,
     query: string,
@@ -436,6 +641,34 @@ export class LocalToolExecutor implements ToolExecutorPort {
 
       const trimmed = stdout.trim()
       return trimmed || 'No matches found.'
+    } catch {
+      return null
+    }
+  }
+
+  private async tryRipgrepGlob(
+    rootPath: string,
+    relativeBase: string,
+    pattern: string,
+    limit: number,
+  ): Promise<string[] | null> {
+    try {
+      const args = ['--files', '--color', 'never', '-g', pattern]
+      if (relativeBase !== '.') {
+        args.push(relativeBase)
+      }
+
+      const { stdout } = await execFileAsync('rg', args, {
+        cwd: rootPath,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+      })
+
+      return stdout
+        .split(/\r?\n/g)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, limit)
     } catch {
       return null
     }
@@ -472,6 +705,21 @@ export class LocalToolExecutor implements ToolExecutorPort {
     }
 
     return matches.length > 0 ? matches.join('\n') : 'No matches found.'
+  }
+
+  private async fallbackGlobSearch(
+    rootPath: string,
+    basePath: string,
+    pattern: string,
+    limit: number,
+  ): Promise<string[]> {
+    const files = await collectAllFiles(basePath, Math.max(10_000, limit * 200))
+    const matcher = createGlobMatcher(pattern)
+
+    return files
+      .map((filePath) => relative(rootPath, filePath))
+      .filter((filePath) => matcher(filePath.replaceAll('\\', '/')))
+      .slice(0, limit)
   }
 }
 
@@ -510,6 +758,45 @@ async function collectSearchableFiles(rootPath: string, limit: number): Promise<
       if (TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
         files.push(nextPath)
       }
+    }
+  }
+
+  return files
+}
+
+async function collectAllFiles(rootPath: string, limit: number): Promise<string[]> {
+  const queue = [resolve(rootPath)]
+  const files: string[] = []
+
+  while (queue.length > 0 && files.length < limit) {
+    const current = queue.shift()
+    if (!current) {
+      continue
+    }
+
+    let entries
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      if (files.length >= limit) {
+        break
+      }
+
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') {
+        continue
+      }
+
+      const nextPath = join(current, entry.name)
+      if (entry.isDirectory()) {
+        queue.push(nextPath)
+        continue
+      }
+
+      files.push(nextPath)
     }
   }
 
@@ -619,4 +906,127 @@ function validateReadonlyCommand(
     ok: false,
     reason: 'Only read-only commands are allowed in this build. Supported: rg, git status/diff/log/show/branch/rev-parse.',
   }
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function extractDuckDuckGoResults(
+  html: string,
+  limit: number,
+): Array<{ title: string; url: string; snippet: string }> {
+  const matches = [...html.matchAll(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)]
+  const results: Array<{ title: string; url: string; snippet: string }> = []
+
+  for (const [_, href = '', rawTitle = ''] of matches) {
+    if (results.length >= limit) {
+      break
+    }
+
+    const url = normalizeDuckDuckGoResultUrl(decodeHtmlEntities(href))
+    const title = stripHtmlTags(decodeHtmlEntities(rawTitle)).trim()
+
+    if (!url || !title) {
+      continue
+    }
+
+    results.push({
+      title,
+      url,
+      snippet: '',
+    })
+  }
+
+  return results
+}
+
+function normalizeDuckDuckGoResultUrl(value: string): string {
+  if (!value) {
+    return ''
+  }
+
+  if (value.startsWith('//')) {
+    return `https:${value}`
+  }
+
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    return value
+  }
+
+  if (value.startsWith('/l/?')) {
+    try {
+      const url = new URL(`https://html.duckduckgo.com${value}`)
+      return url.searchParams.get('uddg') ?? ''
+    } catch {
+      return ''
+    }
+  }
+
+  return ''
+}
+
+function stripHtmlTags(value: string): string {
+  return value.replace(/<[^>]+>/g, ' ')
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&apos;', "'")
+    .replaceAll('&gt;', '>')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&amp;', '&')
+}
+
+function createGlobMatcher(pattern: string): (candidate: string) => boolean {
+  const normalizedPattern = pattern.replaceAll('\\', '/')
+  const regex = new RegExp(`^${globToRegex(normalizedPattern)}$`, 'i')
+  return (candidate: string) => regex.test(candidate)
+}
+
+function globToRegex(pattern: string): string {
+  let regex = ''
+
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]
+    const next = pattern[index + 1]
+
+    if (char === '*' && next === '*') {
+      const afterNext = pattern[index + 2]
+      if (afterNext === '/') {
+        regex += '(?:.*/)?'
+        index += 2
+      } else {
+        regex += '.*'
+        index += 1
+      }
+      continue
+    }
+
+    if (char === '*') {
+      regex += '[^/]*'
+      continue
+    }
+
+    if (char === '?') {
+      regex += '[^/]'
+      continue
+    }
+
+    if ('\\.[]{}()+-^$|'.includes(char)) {
+      regex += `\\${char}`
+      continue
+    }
+
+    regex += char
+  }
+
+  return regex
 }

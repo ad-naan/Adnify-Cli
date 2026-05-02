@@ -14,11 +14,15 @@ import type { ModelConfigStorePort } from '../ports/ModelConfigStorePort'
 import type { SessionRepositoryPort } from '../ports/SessionRepositoryPort'
 import type { StorageSettingsPort } from '../ports/StorageSettingsPort'
 import type { ModelConfig, ModelProvider } from '../../domain/assistant/value-objects/ModelConfig'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import {
   createCliCommandInputContent,
   createCliCommandOutputContent,
 } from '../support/CliTranscriptMarkup'
 import { formatWorkspaceSummary } from '../support/formatWorkspaceSummary'
+
+const execFileAsync = promisify(execFile)
 
 export interface ModelSwitcher {
   switchModel: (providerName: string, modelName?: string) => { model: string; baseUrl: string } | null
@@ -34,12 +38,19 @@ export interface ApplyCliCommandCommand {
   bootstrap: BootstrapSnapshot
   configUpdater?: ConfigUpdater
   modelSwitcher?: ModelSwitcher
+  gitRunner?: GitRunner
 }
 
 export interface ApplyCliCommandResult {
   session: ConversationSession
   statusLine: string
   shouldExit?: boolean
+}
+
+export interface GitRunner {
+  diffCheck: (workspacePath: string) => Promise<string>
+  diffStat: (workspacePath: string) => Promise<string>
+  diffPatch: (workspacePath: string) => Promise<string>
 }
 
 export class ApplyCliCommandUseCase {
@@ -154,6 +165,139 @@ export class ApplyCliCommandUseCase {
           tone: 'info',
         })
         return persist(this.i18n.t('cli.tools.status'))
+      }
+
+      case 'review': {
+        addCommandInput()
+
+        if (!command.bootstrap.workspace.isGitRepository) {
+          addCommandOutput(this.i18n.t('cli.review.notGit'), {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist(this.i18n.t('cli.review.notGit'))
+        }
+
+        try {
+          const gitRunner = command.gitRunner ?? defaultGitRunner
+          const [diffCheck, diffStat] = await Promise.all([
+            gitRunner.diffCheck(command.bootstrap.workspace.rootPath),
+            gitRunner.diffStat(command.bootstrap.workspace.rootPath),
+          ])
+
+          const trimmedCheck = diffCheck.trim()
+          const trimmedStat = diffStat.trim()
+
+          const reviewText = trimmedCheck
+            ? [
+                this.i18n.t('cli.review.title'),
+                '',
+                this.i18n.t('cli.review.findings'),
+                trimmedCheck,
+                '',
+                this.i18n.t('cli.review.changedFiles'),
+                trimmedStat || this.i18n.t('workspace.none'),
+              ].join('\n')
+            : trimmedStat
+              ? [
+                  this.i18n.t('cli.review.title'),
+                  '',
+                  this.i18n.t('cli.review.clean'),
+                  '',
+                  this.i18n.t('cli.review.changedFiles'),
+                  trimmedStat,
+                ].join('\n')
+              : [
+                  this.i18n.t('cli.review.title'),
+                  '',
+                  this.i18n.t('cli.review.noChanges'),
+                ].join('\n')
+
+          addCommandOutput(reviewText, {
+            title: this.i18n.t('transcript.command'),
+            tone: trimmedCheck ? 'warning' : 'info',
+          })
+          return persist(this.i18n.t('cli.review.status'))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          addCommandOutput(this.i18n.t('cli.review.failed', { message }), {
+            title: this.i18n.t('transcript.command'),
+            tone: 'danger',
+          })
+          return persist(this.i18n.t('cli.review.failed', { message }))
+        }
+      }
+
+      case 'diff': {
+        addCommandInput()
+
+        if (!command.bootstrap.workspace.isGitRepository) {
+          addCommandOutput(this.i18n.t('cli.diff.notGit'), {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist(this.i18n.t('cli.diff.notGit'))
+        }
+
+        try {
+          const gitRunner = command.gitRunner ?? defaultGitRunner
+          const diffPatch = await gitRunner.diffPatch(command.bootstrap.workspace.rootPath)
+          const trimmedPatch = diffPatch.trim()
+
+          addCommandOutput(
+            trimmedPatch
+              ? [this.i18n.t('cli.diff.title'), '', trimLargeBlock(trimmedPatch)].join('\n')
+              : [this.i18n.t('cli.diff.title'), '', this.i18n.t('cli.diff.noChanges')].join('\n'),
+            {
+              title: this.i18n.t('transcript.command'),
+              tone: 'info',
+            },
+          )
+          return persist(this.i18n.t('cli.diff.status'))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          addCommandOutput(this.i18n.t('cli.diff.failed', { message }), {
+            title: this.i18n.t('transcript.command'),
+            tone: 'danger',
+          })
+          return persist(this.i18n.t('cli.diff.failed', { message }))
+        }
+      }
+
+      case 'doctor': {
+        addCommandInput()
+        const storage = (await this.storageSettings.inspect()).effectiveStorage
+        const modelConfig = command.bootstrap.modelConfig
+        const isConfigured = Boolean(modelConfig.apiKey)
+        const doctorText = [
+          this.i18n.t('cli.doctor.title'),
+          formatKeyValueLine('workspace', command.bootstrap.workspace.rootPath),
+          formatKeyValueLine(
+            'git',
+            this.i18n.t(command.bootstrap.workspace.isGitRepository ? 'common.yes' : 'common.no'),
+          ),
+          formatKeyValueLine('package', command.bootstrap.workspace.packageManager),
+          formatKeyValueLine('model', modelConfig.model),
+          formatKeyValueLine('provider', modelConfig.provider),
+          formatKeyValueLine(
+            'configured',
+            this.i18n.t(isConfigured ? 'common.yes' : 'common.no'),
+          ),
+          formatKeyValueLine('baseUrl', modelConfig.baseUrl),
+          formatKeyValueLine('tools', String(command.bootstrap.toolCatalog.length)),
+          formatKeyValueLine('storage', storage.dataRoot),
+          formatKeyValueLine('session', formatShortSessionId(session.id)),
+          '',
+          isConfigured
+            ? this.i18n.t('cli.doctor.ready')
+            : this.i18n.t('cli.doctor.setupRequired'),
+        ].join('\n')
+
+        addCommandOutput(doctorText, {
+          title: this.i18n.t('transcript.command'),
+          tone: isConfigured ? 'info' : 'warning',
+        })
+        return persist(this.i18n.t('cli.doctor.status'))
       }
 
       case 'model': {
@@ -496,6 +640,35 @@ export class ApplyCliCommandUseCase {
   }
 }
 
+const defaultGitRunner: GitRunner = {
+  diffCheck: async (workspacePath) => runGitCommand(workspacePath, ['diff', '--check']),
+  diffStat: async (workspacePath) => runGitCommand(workspacePath, ['diff', '--stat']),
+  diffPatch: async (workspacePath) =>
+    runGitCommand(workspacePath, ['diff', '--no-ext-diff', '--unified=3']),
+}
+
+async function runGitCommand(workspacePath: string, args: string[]): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', args, {
+      cwd: workspacePath,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    })
+    return stdout.trim()
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'stdout' in error &&
+      typeof (error as { stdout?: unknown }).stdout === 'string'
+    ) {
+      return ((error as { stdout: string }).stdout ?? '').trim()
+    }
+
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
 function normalizeCommandLine(commandLine: string): string {
   return commandLine.trim().replace(/^[:/]/, '').trim()
 }
@@ -506,6 +679,14 @@ function toDisplayCommand(commandLine: string): string {
 
 function formatToolLine(tool: ToolDescriptor, i18n: AppI18n): string {
   return `- ${localizeToolName(tool, i18n)} [${tool.category}]: ${localizeToolDescription(tool, i18n)}`
+}
+
+function trimLargeBlock(content: string, maxLength = 12_000): string {
+  if (content.length <= maxLength) {
+    return content
+  }
+
+  return `${content.slice(0, maxLength)}\n\n... diff truncated ...`
 }
 
 function localizeToolName(tool: ToolDescriptor, i18n: AppI18n): string {

@@ -23,6 +23,9 @@ export async function loadPromptBundle(): Promise<PromptBundle> {
     'tools/file-ops.md',
     'tools/shell-runner.md',
     'tools/search-index.md',
+    'tools/glob-search.md',
+    'tools/web-fetch.md',
+    'tools/web-search.md',
   ]
 
   const tools = await Promise.all(

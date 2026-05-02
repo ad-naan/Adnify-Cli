@@ -1,6 +1,9 @@
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { AppI18n } from '../i18n/AppI18n'
-import type { AssistantResponderPort } from '../ports/AssistantResponderPort'
+import type {
+  AssistantResponderPort,
+  PendingToolApproval,
+} from '../ports/AssistantResponderPort'
 import type { CliConfigPort } from '../ports/CliConfigPort'
 import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
@@ -15,22 +18,26 @@ export interface SubmitPromptCommand {
   abortSignal?: AbortSignal
 }
 
+export interface SubmitApprovalDecisionCommand {
+  sessionId: string
+  approved: boolean
+  abortSignal?: AbortSignal
+}
+
 export interface SubmitPromptResult {
   session: ConversationSession
   statusLine: string
+  pendingApproval?: PendingToolApproval | null
 }
 
 export interface StreamingCallbacks {
   onChunk: (delta: string) => void
   onTranscript?: (content: string) => void
+  onApproval?: (approval: PendingToolApproval) => void
   onDone: (fullContent: string) => void
   onError: (error: Error) => void
 }
 
-/**
- * 提交用户输入并获得助手回复。
- * 同时支持同步与流式两种路径，其中流式路径是 CLI 的主交互链路。
- */
 export class SubmitPromptUseCase {
   constructor(
     private readonly sessionRepository: SessionRepositoryPort,
@@ -79,10 +86,6 @@ export class SubmitPromptUseCase {
     return { session, statusLine: this.i18n.t('status.responseCompleted') }
   }
 
-  /**
-   * 流式提交。
-   * 先记录用户消息，再通过回调逐步输出助手响应，完成后写回会话。
-   */
   async executeStreaming(
     command: SubmitPromptCommand,
     callbacks: StreamingCallbacks,
@@ -99,19 +102,64 @@ export class SubmitPromptUseCase {
     session.addUserMessage(this.idGenerator.next(), now, prompt)
 
     const workspace = await this.workspaceContextPort.inspect(session.workspacePath)
-    const chunks: string[] = []
-
-    try {
-      for await (const chunk of this.assistantResponder.streamReply({
+    return this.consumeAssistantStream(
+      session,
+      prompt.length,
+      this.assistantResponder.streamReply({
         prompt,
         session,
         workspace,
         toolCatalog: this.config.getToolCatalog(),
         abortSignal: command.abortSignal,
-      })) {
+      }),
+      callbacks,
+      command.abortSignal,
+    )
+  }
+
+  async executeApprovalDecision(
+    command: SubmitApprovalDecisionCommand,
+    callbacks: StreamingCallbacks,
+  ): Promise<SubmitPromptResult> {
+    const session = await this.getSession(command.sessionId)
+
+    return this.consumeAssistantStream(
+      session,
+      0,
+      this.assistantResponder.streamApprovalDecision({
+        sessionId: command.sessionId,
+        approved: command.approved,
+        abortSignal: command.abortSignal,
+      }),
+      callbacks,
+      command.abortSignal,
+    )
+  }
+
+  private async consumeAssistantStream(
+    session: ConversationSession,
+    promptLength: number,
+    stream: AsyncIterable<{
+      delta: string
+      transcript?: string
+      approval?: PendingToolApproval
+    }>,
+    callbacks: StreamingCallbacks,
+    abortSignal?: AbortSignal,
+  ): Promise<SubmitPromptResult> {
+    const chunks: string[] = []
+    let pendingApproval: PendingToolApproval | null = null
+
+    try {
+      for await (const chunk of stream) {
         if (chunk.transcript) {
           session.addSystemMessage(this.idGenerator.next(), this.clock.now(), chunk.transcript)
           callbacks.onTranscript?.(chunk.transcript)
+        }
+
+        if (chunk.approval) {
+          pendingApproval = chunk.approval
+          callbacks.onApproval?.(chunk.approval)
         }
 
         if (chunk.delta) {
@@ -121,6 +169,16 @@ export class SubmitPromptUseCase {
       }
 
       const fullContent = chunks.join('')
+
+      if (pendingApproval) {
+        await this.sessionRepository.save(session)
+        return {
+          session,
+          statusLine: this.i18n.t('status.approvalRequired'),
+          pendingApproval,
+        }
+      }
+
       session.addAssistantMessage(this.idGenerator.next(), this.clock.now(), fullContent)
       await this.sessionRepository.save(session)
 
@@ -129,7 +187,7 @@ export class SubmitPromptUseCase {
       this.logger.info('Streaming prompt completed', {
         sessionId: session.id,
         mode: session.mode,
-        promptLength: prompt.length,
+        promptLength,
         replyLength: fullContent.length,
       })
 
@@ -144,7 +202,7 @@ export class SubmitPromptUseCase {
           this.idGenerator.next(),
           this.clock.now(),
           `${partial}\n\n[${
-            this.i18n.locale === 'en' ? 'Response interrupted' : '响应中断'
+            this.i18n.locale === 'en' ? 'Response interrupted' : '鍝嶅簲涓柇'
           }]`,
         )
         await this.sessionRepository.save(session)
@@ -157,7 +215,7 @@ export class SubmitPromptUseCase {
 
       return {
         session,
-        statusLine: command.abortSignal?.aborted
+        statusLine: abortSignal?.aborted
           ? this.i18n.t('status.executionAborted')
           : this.i18n.t('status.responseFailed', { message: err.message }),
       }

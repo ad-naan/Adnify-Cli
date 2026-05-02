@@ -1,10 +1,12 @@
 import type { AssistantPromptSet } from '../../application/dto/AssistantPromptSet'
 import type { AppI18n } from '../../application/i18n/AppI18n'
 import type {
+  AssistantApprovalCommand,
   AssistantReply,
   AssistantResponderCommand,
   AssistantResponderPort,
   AssistantStreamChunk,
+  PendingToolApproval,
 } from '../../application/ports/AssistantResponderPort'
 import type { CliConfigPort } from '../../application/ports/CliConfigPort'
 import type { LoggerPort } from '../../application/ports/LoggerPort'
@@ -25,8 +27,17 @@ interface ApprovalDecision {
   reason?: string
 }
 
+interface PendingApprovalState {
+  approval: PendingToolApproval
+  activeMessages: ModelMessage[]
+  responseText: string
+  workspace: WorkspaceContext
+  nextTurn: number
+}
+
 export class ModelAssistantResponder implements AssistantResponderPort {
   private readonly maxAgentTurns = 4
+  private readonly pendingApprovals = new Map<string, PendingApprovalState>()
 
   constructor(
     private gateway: ModelGatewayPort,
@@ -52,6 +63,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
   }
 
   async *streamReply(command: AssistantResponderCommand): AsyncIterable<AssistantStreamChunk> {
+    this.pendingApprovals.delete(command.session.id)
+
     const messages = this.buildMessages(command)
 
     this.logger.debug('Sending request to model gateway', {
@@ -62,145 +75,291 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     })
 
     try {
-      let activeMessages = [...messages]
-
-      for (let turn = 0; turn < this.maxAgentTurns; turn += 1) {
-        const responseText = await this.collectResponseText(activeMessages, command.abortSignal)
-        const toolCall = parseToolCallMarkup(responseText)
-
-        if (!toolCall) {
-          yield {
-            kind: 'text',
-            delta: responseText,
-            done: true,
-          }
-          return
-        }
-
-        yield {
-          kind: 'transcript',
-          delta: '',
-          transcript: createCliNoticeContent(
-            [
-              this.i18n.locale === 'en'
-                ? 'Executing assistant tool request.'
-                : '正在执行助手工具请求。',
-              `tool: ${toolCall.name}`,
-              `input: ${this.truncateForTranscript(toolCall.input, 400)}`,
-            ].join('\n'),
-            {
-              title: `${this.i18n.t('transcript.tools')} · ${toolCall.name}`,
-              tone: 'info',
-            },
-          ),
-          done: false,
-        }
-
-        const approvalDecision = this.resolveApprovalDecision(
-          toolCall.name,
-          toolCall.input,
-          command.toolCatalog,
-        )
-
-        if (approvalDecision.required) {
-          const approvalReason =
-            approvalDecision.reason ??
-            (this.i18n.locale === 'en'
-              ? 'This tool call needs user approval before execution.'
-              : '该工具调用需要先获得用户审批后才能执行。')
-
-          this.logger.info('Blocked assistant tool call pending approval', {
-            toolId: toolCall.name,
-            mode: command.session.mode,
-            reason: approvalReason,
-          })
-
-          yield {
-            kind: 'transcript',
-            delta: '',
-            transcript: createCliCommandOutputContent(approvalReason, {
-              title: `${this.i18n.t('transcript.tools')} · ${toolCall.name}`,
-              tone: 'warning',
-            }),
-            done: false,
-          }
-
-          yield {
-            kind: 'text',
-            delta:
-              this.i18n.locale === 'en'
-                ? `I paused before running ${toolCall.name} because approval is required. ${approvalReason}`
-                : `我已在执行 ${toolCall.name} 前暂停，因为它需要审批。${approvalReason}`,
-            done: true,
-          }
-          return
-        }
-
-        const toolResult = await this.toolExecutor.execute({
-          toolId: toolCall.name,
-          input: toolCall.input,
-          workspace: command.workspace,
-        })
-
-        this.logger.info('Executed assistant tool call', {
-          toolId: toolResult.toolId,
-          ok: toolResult.ok,
-          mode: command.session.mode,
-        })
-
-        yield {
-          kind: 'transcript',
-          delta: '',
-          transcript: createCliCommandOutputContent(
-            [
-              toolResult.ok
-                ? this.i18n.locale === 'en'
-                  ? 'Tool completed successfully.'
-                  : '工具执行成功完成。'
-                : this.i18n.locale === 'en'
-                  ? 'Tool execution failed.'
-                  : '工具执行失败。',
-              '',
-              this.truncateForTranscript(toolResult.content, 1600),
-            ].join('\n'),
-            {
-              title: `${this.i18n.t('transcript.tools')} · ${toolResult.toolId}`,
-              tone: toolResult.ok ? 'success' : 'danger',
-            },
-          ),
-          done: false,
-        }
-
-        activeMessages = [
-          ...activeMessages,
-          { role: 'assistant', content: responseText },
-          {
-            role: 'user',
-            content: [
-              `Tool result for ${toolResult.toolId}:`,
-              toolResult.ok ? 'status: ok' : 'status: failed',
-              toolResult.content,
-              '',
-              'Continue the task. If another tool is required, emit one tool call only.',
-            ].join('\n'),
-          },
-        ]
-      }
-
-      yield {
-        kind: 'text',
-        delta:
-          this.i18n.locale === 'en'
-            ? 'I reached the current tool-execution turn limit. Please refine the request or continue.'
-            : '已达到当前工具执行轮次上限，请继续细化需求或再次发起执行。',
-        done: true,
-      }
+      yield* this.runConversationLoop({
+        sessionId: command.session.id,
+        activeMessages: [...messages],
+        workspace: command.workspace,
+        toolCatalog: command.toolCatalog,
+        startTurn: 0,
+        abortSignal: command.abortSignal,
+      })
     } catch (error) {
       this.logger.error('Model gateway error', {
         error: error instanceof Error ? error.message : String(error),
       })
       throw error
     }
+  }
+
+  async *streamApprovalDecision(
+    command: AssistantApprovalCommand,
+  ): AsyncIterable<AssistantStreamChunk> {
+    const pendingState = this.pendingApprovals.get(command.sessionId)
+
+    if (!pendingState) {
+      throw new Error(
+        this.i18n.locale === 'en'
+          ? 'No pending tool approval was found for this session.'
+          : '当前会话没有待处理的工具审批请求。',
+      )
+    }
+
+    this.pendingApprovals.delete(command.sessionId)
+
+    if (command.approved) {
+      const toolResult = await this.toolExecutor.execute({
+        toolId: pendingState.approval.toolId,
+        input: pendingState.approval.input,
+        workspace: pendingState.workspace,
+      })
+
+      this.logger.info('Executed assistant tool call after approval', {
+        toolId: toolResult.toolId,
+        ok: toolResult.ok,
+      })
+
+      yield {
+        kind: 'transcript',
+        delta: '',
+        transcript: createCliCommandOutputContent(
+          [
+            this.i18n.locale === 'en'
+              ? 'Tool completed successfully after approval.'
+              : '工具已在审批通过后执行完成。',
+            '',
+            this.truncateForTranscript(toolResult.content, 1600),
+          ].join('\n'),
+          {
+            title: `${this.i18n.t('transcript.tools')} · ${toolResult.toolId}`,
+            tone: toolResult.ok ? 'success' : 'danger',
+          },
+        ),
+        done: false,
+      }
+
+      yield* this.runConversationLoop({
+        sessionId: command.sessionId,
+        activeMessages: this.appendToolFollowupMessages(
+          pendingState.activeMessages,
+          pendingState.responseText,
+          toolResult.toolId,
+          toolResult.ok ? 'ok' : 'failed',
+          toolResult.content,
+        ),
+        workspace: pendingState.workspace,
+        toolCatalog: this.cliConfig.getToolCatalog(),
+        startTurn: pendingState.nextTurn,
+        abortSignal: command.abortSignal,
+      })
+      return
+    }
+
+    yield {
+      kind: 'transcript',
+      delta: '',
+      transcript: createCliCommandOutputContent(
+        this.i18n.locale === 'en'
+          ? 'User denied this tool request. The assistant must continue without running it.'
+          : '用户拒绝了这次工具请求，助手需要在不执行工具的情况下继续。',
+        {
+          title: `${this.i18n.t('transcript.tools')} · ${pendingState.approval.toolId}`,
+          tone: 'warning',
+        },
+      ),
+      done: false,
+    }
+
+    yield* this.runConversationLoop({
+      sessionId: command.sessionId,
+      activeMessages: [
+        ...pendingState.activeMessages,
+        { role: 'assistant', content: pendingState.responseText },
+        {
+          role: 'user',
+          content: [
+            `Tool request for ${pendingState.approval.toolId} was denied by the user.`,
+            'Continue without executing it.',
+            'If another tool is required, emit one tool call only.',
+          ].join('\n'),
+        },
+      ],
+      workspace: pendingState.workspace,
+      toolCatalog: this.cliConfig.getToolCatalog(),
+      startTurn: pendingState.nextTurn,
+      abortSignal: command.abortSignal,
+    })
+  }
+
+  private async *runConversationLoop(params: {
+    sessionId: string
+    activeMessages: ModelMessage[]
+    workspace: WorkspaceContext
+    toolCatalog: ToolDescriptor[]
+    startTurn: number
+    abortSignal?: AbortSignal
+  }): AsyncIterable<AssistantStreamChunk> {
+    let activeMessages = [...params.activeMessages]
+
+    for (let turn = params.startTurn; turn < this.maxAgentTurns; turn += 1) {
+      const responseText = await this.collectResponseText(activeMessages, params.abortSignal)
+      const toolCall = parseToolCallMarkup(responseText)
+
+      if (!toolCall) {
+        yield {
+          kind: 'text',
+          delta: responseText,
+          done: true,
+        }
+        return
+      }
+
+      yield {
+        kind: 'transcript',
+        delta: '',
+        transcript: createCliNoticeContent(
+          [
+            this.i18n.locale === 'en'
+              ? 'Executing assistant tool request.'
+              : '正在执行助手工具请求。',
+            `tool: ${toolCall.name}`,
+            `input: ${this.truncateForTranscript(toolCall.input, 400)}`,
+          ].join('\n'),
+          {
+            title: `${this.i18n.t('transcript.tools')} · ${toolCall.name}`,
+            tone: 'info',
+          },
+        ),
+        done: false,
+      }
+
+      const approvalDecision = this.resolveApprovalDecision(
+        toolCall.name,
+        toolCall.input,
+        params.toolCatalog,
+      )
+
+      if (approvalDecision.required) {
+        const descriptor = params.toolCatalog.find((tool) => tool.id === toolCall.name)
+        const approvalReason =
+          approvalDecision.reason ??
+          (this.i18n.locale === 'en'
+            ? 'This tool call needs user approval before execution.'
+            : '该工具调用需要先获得用户审批后才能执行。')
+
+        const approval: PendingToolApproval = {
+          id: `${params.sessionId}:${turn}:${toolCall.name}`,
+          toolId: toolCall.name,
+          toolName: descriptor?.name ?? toolCall.name,
+          input: toolCall.input,
+          reason: approvalReason,
+        }
+
+        this.pendingApprovals.set(params.sessionId, {
+          approval,
+          activeMessages,
+          responseText,
+          workspace: params.workspace,
+          nextTurn: turn + 1,
+        })
+
+        this.logger.info('Blocked assistant tool call pending approval', {
+          toolId: toolCall.name,
+          reason: approvalReason,
+        })
+
+        yield {
+          kind: 'transcript',
+          delta: '',
+          transcript: createCliCommandOutputContent(approvalReason, {
+            title: `${this.i18n.t('transcript.tools')} · ${toolCall.name}`,
+            tone: 'warning',
+          }),
+          done: false,
+        }
+
+        yield {
+          kind: 'approval',
+          delta: '',
+          approval,
+          done: true,
+        }
+        return
+      }
+
+      const toolResult = await this.toolExecutor.execute({
+        toolId: toolCall.name,
+        input: toolCall.input,
+        workspace: params.workspace,
+      })
+
+      this.logger.info('Executed assistant tool call', {
+        toolId: toolResult.toolId,
+        ok: toolResult.ok,
+      })
+
+      yield {
+        kind: 'transcript',
+        delta: '',
+        transcript: createCliCommandOutputContent(
+          [
+            toolResult.ok
+              ? this.i18n.locale === 'en'
+                ? 'Tool completed successfully.'
+                : '工具执行成功完成。'
+              : this.i18n.locale === 'en'
+                ? 'Tool execution failed.'
+                : '工具执行失败。',
+            '',
+            this.truncateForTranscript(toolResult.content, 1600),
+          ].join('\n'),
+          {
+            title: `${this.i18n.t('transcript.tools')} · ${toolResult.toolId}`,
+            tone: toolResult.ok ? 'success' : 'danger',
+          },
+        ),
+        done: false,
+      }
+
+      activeMessages = this.appendToolFollowupMessages(
+        activeMessages,
+        responseText,
+        toolResult.toolId,
+        toolResult.ok ? 'ok' : 'failed',
+        toolResult.content,
+      )
+    }
+
+    yield {
+      kind: 'text',
+      delta:
+        this.i18n.locale === 'en'
+          ? 'I reached the current tool-execution turn limit. Please refine the request or continue.'
+          : '已达到当前工具执行轮次上限，请继续细化需求或再次发起执行。',
+      done: true,
+    }
+  }
+
+  private appendToolFollowupMessages(
+    activeMessages: ModelMessage[],
+    responseText: string,
+    toolId: string,
+    status: 'ok' | 'failed',
+    content: string,
+  ): ModelMessage[] {
+    return [
+      ...activeMessages,
+      { role: 'assistant', content: responseText },
+      {
+        role: 'user',
+        content: [
+          `Tool result for ${toolId}:`,
+          `status: ${status}`,
+          content,
+          '',
+          'Continue the task. If another tool is required, emit one tool call only.',
+        ].join('\n'),
+      },
+    ]
   }
 
   private async collectResponseText(
@@ -292,9 +451,12 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       'The inner content must be valid JSON.',
       'Safe read-only tools can run directly. Careful and dangerous actions may be paused for approval before execution.',
       'For file-ops, use JSON like {"action":"read","path":"src/main.tsx"}, {"action":"list","path":"src"}, {"action":"write","path":"src/example.ts","content":"...","allowWrite":true}, or {"action":"update","path":"src/example.ts","oldText":"before","newText":"after","allowWrite":true}.',
+      'For glob-search, use JSON like {"pattern":"src/**/*.ts","limit":20} or {"pattern":"*.test.ts","path":"src"}.',
       'For shell-runner, use JSON like {"argv":["rg","query","src"]}.',
+      'For web-fetch, use JSON like {"url":"https://example.com/docs"}.',
+      'For web-search, use JSON like {"query":"Bun Ink CLI patterns","limit":5} or {"query":"OpenAI API docs","domain":"platform.openai.com"}.',
       'After the tool result is returned, continue the task normally.',
-      'Available executable tools in this build: workspace-read, search-index, file-ops, shell-runner.',
+      'Available executable tools in this build: workspace-read, search-index, glob-search, file-ops, shell-runner, web-fetch, web-search.',
     ].join('\n')
   }
 
@@ -310,8 +472,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         required: true,
         reason:
           this.i18n.locale === 'en'
-            ? `${descriptor.name} is marked as dangerous and is paused until an approval flow is implemented.`
-            : `${descriptor.name} 被标记为 dangerous，在审批流正式完成前会先暂停执行。`,
+            ? `${descriptor.name} is marked as dangerous and requires explicit approval before execution.`
+            : `${descriptor.name} 被标记为 dangerous，需要在执行前获得明确审批。`,
       }
     }
 
@@ -334,8 +496,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         required: true,
         reason:
           this.i18n.locale === 'en'
-            ? `file-ops action "${action}" changes workspace files and is paused until the approval flow is implemented.`
-            : `file-ops 的 "${action}" 操作会修改工作区文件，在审批流完成前会先暂停执行。`,
+            ? `file-ops action "${action}" changes workspace files and requires approval before execution.`
+            : `file-ops 的 "${action}" 操作会修改工作区文件，需要在执行前审批。`,
       }
     }
 

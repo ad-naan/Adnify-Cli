@@ -8,6 +8,9 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :mode plan
 - :workspace
 - :tools
+- :doctor
+- :diff
+- :review
 - :model [provider] [model]
 - :config
 - :config init

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { AssistantProfile } from '../../domain/assistant/entities/AssistantProfile'
-import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
+import type { ModelConfig, ProvidersMap } from '../../domain/assistant/value-objects/ModelConfig'
 import { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import { ToolDescriptor } from '../../domain/tooling/entities/ToolDescriptor'
 import { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
@@ -13,6 +13,8 @@ import type { SessionRepositoryPort } from '../ports/SessionRepositoryPort'
 import type { StorageSettingsPort } from '../ports/StorageSettingsPort'
 import { parseCliTranscriptMarkup } from '../support/CliTranscriptMarkup'
 import { ApplyCliCommandUseCase } from './ApplyCliCommandUseCase'
+import type { AppStorageSnapshot } from '../dto/AppStorageSnapshot'
+import type { BootstrapSnapshot } from '../dto/BootstrapSnapshot'
 
 function createMockLogger(): LoggerPort {
   return {
@@ -53,7 +55,7 @@ function createMockSessionRepo(): SessionRepositoryPort & { sessions: Map<string
 
 function createMockStorageSettings(): StorageSettingsPort {
   let configuredDataRoot: string | null = 'E:/AdnifyData'
-  let effectiveStorage = {
+  let effectiveStorage: AppStorageSnapshot = {
     dataRoot: 'E:/AdnifyData',
     configPath: 'E:/AdnifyData/config.json',
     sessionsDir: 'E:/AdnifyData/sessions',
@@ -119,7 +121,7 @@ function createMockModelConfigStore(): ModelConfigStorePort & { saved: ModelConf
   }
 }
 
-function createBootstrapSnapshot() {
+function createBootstrapSnapshot(): BootstrapSnapshot {
   return {
     profile: new AssistantProfile({
       id: 'adnify',
@@ -151,7 +153,7 @@ function createBootstrapSnapshot() {
         baseUrl: 'https://api.openai.com/v1',
         models: ['gpt-5', 'gpt-5.4'],
       },
-    },
+    } satisfies ProvidersMap,
     supportedModes: ['chat', 'agent', 'plan'],
     storage: {
       dataRoot: 'E:/AdnifyData',
@@ -174,6 +176,9 @@ function createBootstrapSnapshot() {
       ':mode chat',
       ':workspace',
       ':tools',
+      ':doctor',
+      ':diff',
+      ':review',
       ':model',
       ':config',
       ':session',
@@ -433,6 +438,161 @@ describe('ApplyCliCommandUseCase', () => {
     expect(output?.content).toContain('Current session:')
     expect(output?.content).toContain('Current session title')
     expect(output?.content).toContain('sess-meta')
+  })
+
+  test('should review the current git diff', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-review',
+      title: 'Review',
+      mode: 'agent',
+      workspacePath: 'E:/26Project/Adnify-Cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':review',
+      bootstrap: createBootstrapSnapshot(),
+      gitRunner: {
+        diffCheck: async () => 'src/main.ts:12: trailing whitespace.',
+        diffStat: async () => ' src/main.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)',
+        diffPatch: async () => '',
+      },
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('Findings:')
+    expect(output?.content).toContain('trailing whitespace')
+    expect(output?.content).toContain('Changed files:')
+    expect(result.statusLine).toContain('Reviewed the current diff')
+  })
+
+  test('should show a compact runtime diagnostic summary', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-doctor',
+      title: 'Doctor',
+      mode: 'agent',
+      workspacePath: 'E:/26Project/Adnify-Cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':doctor',
+      bootstrap: createBootstrapSnapshot(),
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('Runtime diagnostics:')
+    expect(output?.content).toContain('E:/26Project/Adnify-Cli')
+    expect(output?.content).toContain('gpt-5.4')
+    expect(output?.content).toContain('Runtime looks ready.')
+    expect(result.statusLine).toContain('Displayed runtime diagnostics')
+  })
+
+  test('should show the current git diff patch', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-diff',
+      title: 'Diff',
+      mode: 'agent',
+      workspacePath: 'E:/26Project/Adnify-Cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':diff',
+      bootstrap: createBootstrapSnapshot(),
+      gitRunner: {
+        diffCheck: async () => '',
+        diffStat: async () => '',
+        diffPatch: async () =>
+          'diff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-console.log("old")\n+console.log("new")',
+      },
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('Current diff:')
+    expect(output?.content).toContain('diff --git a/src/main.ts b/src/main.ts')
+    expect(output?.content).toContain('+console.log("new")')
+    expect(result.statusLine).toContain('Displayed the current diff')
+  })
+
+  test('should show a friendly message when there is no current git diff', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-diff-empty',
+      title: 'Diff empty',
+      mode: 'agent',
+      workspacePath: 'E:/26Project/Adnify-Cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':diff',
+      bootstrap: createBootstrapSnapshot(),
+      gitRunner: {
+        diffCheck: async () => '',
+        diffStat: async () => '',
+        diffPatch: async () => '',
+      },
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('No current git diff was found.')
+    expect(result.statusLine).toContain('Displayed the current diff')
   })
 
   test('should update model config via command subcommand', async () => {

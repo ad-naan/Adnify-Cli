@@ -1,5 +1,6 @@
 import type { AppI18n } from '../../application/i18n/AppI18n'
 import type {
+  AssistantApprovalCommand,
   AssistantReply,
   AssistantResponderCommand,
   AssistantResponderPort,
@@ -41,6 +42,12 @@ export class StubAssistantResponder implements AssistantResponderPort {
       yield { kind: 'text', delta: word, done: false }
     }
 
+    yield { kind: 'text', delta: '', done: true }
+  }
+
+  async *streamApprovalDecision(
+    _command: AssistantApprovalCommand,
+  ): AsyncIterable<AssistantStreamChunk> {
     yield { kind: 'text', delta: '', done: true }
   }
 

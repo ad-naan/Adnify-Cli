@@ -52,6 +52,8 @@ export function App(props: AppProps) {
   const headerRows = showEmptyState ? 0 : 7
   const inputRows = controller.configInitPrompt
     ? 14
+    : controller.approvalPrompt
+      ? 13
     : controller.isSuggestionOpen
       ? 12
       : controller.isBusy
@@ -184,6 +186,7 @@ export function App(props: AppProps) {
           mode={controller.session.mode}
           modelLabel={modelLabel}
           configInitPrompt={controller.configInitPrompt}
+          approvalPrompt={controller.approvalPrompt}
           commandSuggestions={controller.commandSuggestions}
           selectedSuggestionIndex={controller.selectedSuggestionIndex}
           isSuggestionOpen={controller.isSuggestionOpen}

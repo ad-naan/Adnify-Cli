@@ -16,6 +16,8 @@ import { ConversationSession } from '../../domain/session/aggregates/Conversatio
 import { ToolDescriptor } from '../../domain/tooling/entities/ToolDescriptor'
 import { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import { ModelAssistantResponder } from './ModelAssistantResponder'
+import { parseCliTranscriptMarkup } from '../../application/support/CliTranscriptMarkup'
+
 
 function createMockLogger(): LoggerPort {
   return {
@@ -140,7 +142,7 @@ describe('ModelAssistantResponder', () => {
     }
 
     expect(capturedRequest).not.toBeNull()
-    const request = capturedRequest as ModelRequest
+    const request = capturedRequest as unknown as ModelRequest
     expect(request.messages[0]?.role).toBe('system')
     expect(request.messages[0]?.content).toContain('core system')
     expect(request.messages[0]?.content).toContain('agent instructions')
@@ -238,7 +240,7 @@ describe('ModelAssistantResponder', () => {
     )
   })
 
-  test('should pause dangerous tools until approval flow is implemented', async () => {
+  test('should emit a pending approval event for dangerous tools', async () => {
     let executed = false
 
     const gateway: ModelGatewayPort = {
@@ -287,8 +289,8 @@ describe('ModelAssistantResponder', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
 
-    const chunks: string[] = []
     const transcripts: string[] = []
+    const approvals: string[] = []
     for await (const chunk of responder.streamReply({
       prompt: 'inspect the repository state',
       session,
@@ -311,16 +313,18 @@ describe('ModelAssistantResponder', () => {
       if (chunk.transcript) {
         transcripts.push(chunk.transcript)
       }
-      chunks.push(chunk.delta)
+      if (chunk.approval) {
+        approvals.push(chunk.approval.toolId)
+      }
     }
 
     expect(executed).toBe(false)
     expect(transcripts).toHaveLength(2)
-    expect(transcripts[1]).toContain('paused until an approval flow is implemented')
-    expect(chunks.join('')).toContain('approval is required')
+    expect(transcripts[1]).toContain('requires explicit approval')
+    expect(approvals).toEqual(['shell-runner'])
   })
 
-  test('should pause file writes until approval flow is implemented', async () => {
+  test('should emit a pending approval event for file writes', async () => {
     let executed = false
 
     const gateway: ModelGatewayPort = {
@@ -370,8 +374,8 @@ describe('ModelAssistantResponder', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
 
-    const chunks: string[] = []
     const transcripts: string[] = []
+    const approvals: string[] = []
     for await (const chunk of responder.streamReply({
       prompt: 'create a file',
       session,
@@ -394,12 +398,112 @@ describe('ModelAssistantResponder', () => {
       if (chunk.transcript) {
         transcripts.push(chunk.transcript)
       }
-      chunks.push(chunk.delta)
+      if (chunk.approval) {
+        approvals.push(chunk.approval.toolId)
+      }
     }
 
     expect(executed).toBe(false)
     expect(transcripts).toHaveLength(2)
-    expect(transcripts[1]).toContain('file-ops action "write"')
-    expect(chunks.join('')).toContain('approval is required')
+    const parsedTranscript = parseCliTranscriptMarkup(transcripts[1] ?? '')
+    expect(parsedTranscript?.kind).toBe('command-output')
+    expect(parsedTranscript?.content).toContain('file-ops action "write"')
+    expect(approvals).toEqual(['file-ops'])
+  })
+
+  test('should resume execution after approval is granted', async () => {
+    let executed = false
+    let invocation = 0
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        invocation += 1
+
+        if (invocation === 1) {
+          yield {
+            delta: '<adnify_tool_call name="shell-runner">{"argv":["git","status"]}</adnify_tool_call>',
+            finishReason: 'stop',
+          }
+          return
+        }
+
+        yield { delta: 'Repository state reviewed.', finishReason: 'stop' }
+      },
+    }
+
+    const responder = new ModelAssistantResponder(
+      gateway,
+      {
+        provider: 'openai-compatible',
+        apiKey: 'x',
+        baseUrl: 'https://example.com',
+        model: 'test-model',
+        maxTokens: 1000,
+        temperature: 0,
+        timeoutMs: 1000,
+      },
+      createMockConfig({
+        core: 'core system',
+        modes: {
+          chat: 'chat instructions',
+          agent: 'agent instructions',
+          plan: 'plan instructions',
+        },
+      }),
+      {
+        execute: async () => {
+          executed = true
+          return { toolId: 'shell-runner', ok: true, content: 'clean tree' }
+        },
+      },
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const session = ConversationSession.create({
+      id: 'session-5',
+      title: 'test',
+      mode: 'agent',
+      workspacePath: '/workspace',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    for await (const _chunk of responder.streamReply({
+      prompt: 'inspect the repository state',
+      session,
+      workspace: new WorkspaceContext({
+        rootPath: '/workspace',
+        isGitRepository: true,
+        packageManager: 'bun',
+        topLevelEntries: ['src', 'package.json'],
+      }),
+      toolCatalog: [
+        new ToolDescriptor({
+          id: 'shell-runner',
+          name: 'Shell Runner',
+          description: 'Run terminal commands',
+          category: 'terminal',
+          riskLevel: 'dangerous',
+        }),
+      ],
+    })) {
+      // wait until paused for approval
+    }
+
+    const chunks: string[] = []
+    const transcripts: string[] = []
+    for await (const chunk of responder.streamApprovalDecision({
+      sessionId: session.id,
+      approved: true,
+    })) {
+      if (chunk.transcript) {
+        transcripts.push(chunk.transcript)
+      }
+      chunks.push(chunk.delta)
+    }
+
+    expect(executed).toBe(true)
+    expect(transcripts[0]).toContain('after approval')
+    expect(chunks.join('')).toBe('Repository state reviewed.')
   })
 })

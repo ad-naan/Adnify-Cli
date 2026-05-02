@@ -16,6 +16,7 @@ export interface InputDockProps {
   mode: AssistantMode
   modelLabel: string
   configInitPrompt?: string
+  approvalPrompt?: string
   commandSuggestions: CommandSuggestionItem[]
   selectedSuggestionIndex: number
   isSuggestionOpen: boolean
@@ -24,15 +25,21 @@ export interface InputDockProps {
 
 export const InputDock = memo(function InputDock(props: InputDockProps) {
   const isConfigActive = Boolean(props.configInitPrompt)
+  const isApprovalActive = Boolean(props.approvalPrompt)
   const configPromptLines = props.configInitPrompt?.split('\n') ?? []
+  const approvalPromptLines = props.approvalPrompt?.split('\n') ?? []
   const panelSubtitle = props.isSuggestionOpen
     ? `${props.commandSuggestions.length} commands`
-    : props.modelLabel
+    : isApprovalActive
+      ? approvalPromptLines[0] ?? props.modelLabel
+      : props.modelLabel
 
   return (
     <Panel
       title={
-        isConfigActive
+        isApprovalActive
+          ? props.i18n.t('input.panelApproval')
+          : isConfigActive
           ? props.i18n.t('input.panelSetup')
           : props.isSuggestionOpen
             ? props.i18n.t('input.panelCommands')
@@ -54,7 +61,11 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
 
         <Box gap={1}>
           <Text color={adnifyTheme.textDim}>
-            {isConfigActive ? props.i18n.t('input.labelSetupMode') : props.mode}
+            {isApprovalActive
+              ? props.i18n.t('input.labelApprovalMode')
+              : isConfigActive
+                ? props.i18n.t('input.labelSetupMode')
+                : props.mode}
           </Text>
           {props.isSuggestionOpen ? (
             <Text color={adnifyTheme.brand}>{props.i18n.t('input.labelPalette')}</Text>
@@ -62,7 +73,24 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
         </Box>
       </Box>
 
-      {isConfigActive ? (
+      {isApprovalActive ? (
+        <Box
+          flexDirection="column"
+          marginTop={1}
+          borderStyle="round"
+          borderColor={adnifyTheme.warm}
+          paddingX={1}
+        >
+          {approvalPromptLines.map((line, index) => (
+            <Text
+              key={`approval-prompt-${index}`}
+              color={index === 0 ? adnifyTheme.warm : adnifyTheme.textSecondary}
+            >
+              {line || ' '}
+            </Text>
+          ))}
+        </Box>
+      ) : isConfigActive ? (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -117,6 +145,8 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
             <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintDefault')}</Text>
           </Box>
         </Box>
+      ) : isApprovalActive ? (
+        <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintApproval')}</Text>
       ) : isConfigActive ? (
         <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintConfigInit')}</Text>
       ) : !props.busy ? (

@@ -6,10 +6,19 @@ export interface AssistantReply {
   content: string
 }
 
+export interface PendingToolApproval {
+  id: string
+  toolId: string
+  toolName: string
+  input: string
+  reason: string
+}
+
 export interface AssistantStreamChunk {
-  kind?: 'text' | 'transcript'
+  kind?: 'text' | 'transcript' | 'approval'
   delta: string
   transcript?: string
+  approval?: PendingToolApproval
   done: boolean
 }
 
@@ -21,12 +30,14 @@ export interface AssistantResponderCommand {
   abortSignal?: AbortSignal
 }
 
-/**
- * 助手响应端口。
- * 支持同步和流式两种模式，流式为 CLI 交互体验的主路径。
- */
+export interface AssistantApprovalCommand {
+  sessionId: string
+  approved: boolean
+  abortSignal?: AbortSignal
+}
+
 export interface AssistantResponderPort {
   generateReply(command: AssistantResponderCommand): Promise<AssistantReply>
   streamReply(command: AssistantResponderCommand): AsyncIterable<AssistantStreamChunk>
+  streamApprovalDecision(command: AssistantApprovalCommand): AsyncIterable<AssistantStreamChunk>
 }
-

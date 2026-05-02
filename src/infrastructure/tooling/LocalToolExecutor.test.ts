@@ -53,6 +53,146 @@ describe('LocalToolExecutor', () => {
     expect(result.content).toContain('Package manager: bun')
   })
 
+  test('should validate web-fetch url payload', async () => {
+    const executor = new LocalToolExecutor()
+
+    const result = await executor.execute({
+      toolId: 'web-fetch',
+      input: '{}',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('Missing required field "url"')
+  })
+
+  test('should validate glob-search pattern payload', async () => {
+    const executor = new LocalToolExecutor()
+
+    const result = await executor.execute({
+      toolId: 'glob-search',
+      input: '{}',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('Missing required field "pattern"')
+  })
+
+  test('should return matching files for glob-search', async () => {
+    const executor = new LocalToolExecutor()
+
+      const result = await executor.execute({
+        toolId: 'glob-search',
+        input: '{"pattern":"src/**/*.test.ts","limit":20}',
+        workspace: createWorkspace(),
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.content).toContain('Pattern: src/**/*.test.ts')
+      expect(result.content).toContain('src\\application\\i18n\\AppI18n.test.ts')
+      expect(result.content).toContain('src\\infrastructure\\tooling\\LocalToolExecutor.test.ts')
+  })
+
+  test('should validate web-search query payload', async () => {
+    const executor = new LocalToolExecutor()
+
+    const result = await executor.execute({
+      toolId: 'web-search',
+      input: '{}',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('Missing required field "query"')
+  })
+
+  test('should return parsed results for web-search', async () => {
+    const executor = new LocalToolExecutor()
+    const originalFetch = globalThis.fetch
+
+    globalThis.fetch = (async () =>
+      new Response(
+        `
+        <html>
+          <body>
+            <a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs">Example Docs</a>
+            <a class="result__a" href="https://example.org/guide">Example Guide</a>
+          </body>
+        </html>
+        `,
+        {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        },
+      )) as typeof fetch
+
+    try {
+      const result = await executor.execute({
+        toolId: 'web-search',
+        input: '{"query":"terminal ui","limit":2}',
+        workspace: createWorkspace(),
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.content).toContain('Query: terminal ui')
+      expect(result.content).toContain('1. Example Docs')
+      expect(result.content).toContain('https://example.com/docs')
+      expect(result.content).toContain('2. Example Guide')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('should fetch text content for web-fetch', async () => {
+    const executor = new LocalToolExecutor()
+    const originalFetch = globalThis.fetch
+
+    globalThis.fetch = (async () =>
+      new Response('hello from docs', {
+        status: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      })) as typeof fetch
+
+    try {
+      const result = await executor.execute({
+        toolId: 'web-fetch',
+        input: '{"url":"https://example.com/docs"}',
+        workspace: createWorkspace(),
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.content).toContain('URL: https://example.com/docs')
+      expect(result.content).toContain('hello from docs')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('should reject binary-like responses for web-fetch', async () => {
+    const executor = new LocalToolExecutor()
+    const originalFetch = globalThis.fetch
+
+    globalThis.fetch = (async () =>
+      new Response('fake-binary', {
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+      })) as typeof fetch
+
+    try {
+      const result = await executor.execute({
+        toolId: 'web-fetch',
+        input: '{"url":"https://example.com/file.bin"}',
+        workspace: createWorkspace(),
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.content).toContain('Unsupported content type')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('should list a directory for file-ops', async () => {
     const executor = new LocalToolExecutor()
 
