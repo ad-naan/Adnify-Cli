@@ -1,3 +1,4 @@
+/// <reference path="../../types/bun-test.d.ts" />
 import { describe, expect, test } from 'bun:test'
 import type { AssistantPromptSet } from '../../application/dto/AssistantPromptSet'
 import { createAppI18n } from '../../application/i18n/AppI18n'
@@ -139,15 +140,15 @@ describe('ModelAssistantResponder', () => {
     }
 
     expect(capturedRequest).not.toBeNull()
-    expect(capturedRequest?.messages[0]?.role).toBe('system')
-    expect(capturedRequest?.messages[0]?.content).toContain('core system')
-    expect(capturedRequest?.messages[0]?.content).toContain('agent instructions')
-    expect(capturedRequest?.messages[0]?.content).toContain('当前模式：agent')
-    expect(capturedRequest?.messages[0]?.content).toContain('Shell Runner [terminal] (dangerous)')
-    expect(capturedRequest?.messages[0]?.content).toContain('adnify_tool_call')
-    expect(capturedRequest?.messages[capturedRequest.messages.length - 1]?.content).toBe(
-      'implement feature',
-    )
+    const request = capturedRequest as ModelRequest
+    expect(request.messages[0]?.role).toBe('system')
+    expect(request.messages[0]?.content).toContain('core system')
+    expect(request.messages[0]?.content).toContain('agent instructions')
+    expect(request.messages[0]?.content).toContain('当前模式：agent')
+    expect(request.messages[0]?.content).toContain('Shell Runner [terminal] (dangerous)')
+    expect(request.messages[0]?.content).toContain('adnify_tool_call')
+    expect(request.messages[0]?.content).toContain('may be paused for approval')
+    expect(request.messages[request.messages.length - 1]?.content).toBe('implement feature')
   })
 
   test('should execute tool calls before returning final answer', async () => {
@@ -228,11 +229,177 @@ describe('ModelAssistantResponder', () => {
     expect(transcripts[0]).toContain('search-index')
     expect(transcripts[1]).toContain('tool output for search-index')
     expect(capturedRequests).toHaveLength(2)
-    expect(capturedRequests[1]?.messages[capturedRequests[1].messages.length - 1]?.content).toContain(
+    const secondRequest = capturedRequests[1] as ModelRequest
+    expect(secondRequest.messages[secondRequest.messages.length - 1]?.content).toContain(
       'Tool result for search-index:',
     )
-    expect(capturedRequests[1]?.messages[capturedRequests[1].messages.length - 1]?.content).toContain(
+    expect(secondRequest.messages[secondRequest.messages.length - 1]?.content).toContain(
       'tool output for search-index',
     )
+  })
+
+  test('should pause dangerous tools until approval flow is implemented', async () => {
+    let executed = false
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        yield {
+          delta: '<adnify_tool_call name="shell-runner">{"argv":["git","status"]}</adnify_tool_call>',
+          finishReason: 'stop',
+        }
+      },
+    }
+
+    const responder = new ModelAssistantResponder(
+      gateway,
+      {
+        provider: 'openai-compatible',
+        apiKey: 'x',
+        baseUrl: 'https://example.com',
+        model: 'test-model',
+        maxTokens: 1000,
+        temperature: 0,
+        timeoutMs: 1000,
+      },
+      createMockConfig({
+        core: 'core system',
+        modes: {
+          chat: 'chat instructions',
+          agent: 'agent instructions',
+          plan: 'plan instructions',
+        },
+      }),
+      {
+        execute: async () => {
+          executed = true
+          return { toolId: 'shell-runner', ok: true, content: 'should not run' }
+        },
+      },
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const session = ConversationSession.create({
+      id: 'session-3',
+      title: 'test',
+      mode: 'agent',
+      workspacePath: '/workspace',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    const chunks: string[] = []
+    const transcripts: string[] = []
+    for await (const chunk of responder.streamReply({
+      prompt: 'inspect the repository state',
+      session,
+      workspace: new WorkspaceContext({
+        rootPath: '/workspace',
+        isGitRepository: true,
+        packageManager: 'bun',
+        topLevelEntries: ['src', 'package.json'],
+      }),
+      toolCatalog: [
+        new ToolDescriptor({
+          id: 'shell-runner',
+          name: 'Shell Runner',
+          description: 'Run terminal commands',
+          category: 'terminal',
+          riskLevel: 'dangerous',
+        }),
+      ],
+    })) {
+      if (chunk.transcript) {
+        transcripts.push(chunk.transcript)
+      }
+      chunks.push(chunk.delta)
+    }
+
+    expect(executed).toBe(false)
+    expect(transcripts).toHaveLength(2)
+    expect(transcripts[1]).toContain('paused until an approval flow is implemented')
+    expect(chunks.join('')).toContain('approval is required')
+  })
+
+  test('should pause file writes until approval flow is implemented', async () => {
+    let executed = false
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        yield {
+          delta:
+            '<adnify_tool_call name="file-ops">{"action":"write","path":"src/example.ts","content":"export const a = 1","allowWrite":true}</adnify_tool_call>',
+          finishReason: 'stop',
+        }
+      },
+    }
+
+    const responder = new ModelAssistantResponder(
+      gateway,
+      {
+        provider: 'openai-compatible',
+        apiKey: 'x',
+        baseUrl: 'https://example.com',
+        model: 'test-model',
+        maxTokens: 1000,
+        temperature: 0,
+        timeoutMs: 1000,
+      },
+      createMockConfig({
+        core: 'core system',
+        modes: {
+          chat: 'chat instructions',
+          agent: 'agent instructions',
+          plan: 'plan instructions',
+        },
+      }),
+      {
+        execute: async () => {
+          executed = true
+          return { toolId: 'file-ops', ok: true, content: 'should not run' }
+        },
+      },
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const session = ConversationSession.create({
+      id: 'session-4',
+      title: 'test',
+      mode: 'agent',
+      workspacePath: '/workspace',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+
+    const chunks: string[] = []
+    const transcripts: string[] = []
+    for await (const chunk of responder.streamReply({
+      prompt: 'create a file',
+      session,
+      workspace: new WorkspaceContext({
+        rootPath: '/workspace',
+        isGitRepository: true,
+        packageManager: 'bun',
+        topLevelEntries: ['src', 'package.json'],
+      }),
+      toolCatalog: [
+        new ToolDescriptor({
+          id: 'file-ops',
+          name: 'File Ops',
+          description: 'Edit files',
+          category: 'filesystem',
+          riskLevel: 'careful',
+        }),
+      ],
+    })) {
+      if (chunk.transcript) {
+        transcripts.push(chunk.transcript)
+      }
+      chunks.push(chunk.delta)
+    }
+
+    expect(executed).toBe(false)
+    expect(transcripts).toHaveLength(2)
+    expect(transcripts[1]).toContain('file-ops action "write"')
+    expect(chunks.join('')).toContain('approval is required')
   })
 })

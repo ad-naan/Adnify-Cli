@@ -17,7 +17,13 @@ import {
 import { parseToolCallMarkup } from '../../application/support/ToolCallMarkup'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
+import type { ToolDescriptor } from '../../domain/tooling/entities/ToolDescriptor'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
+
+interface ApprovalDecision {
+  required: boolean
+  reason?: string
+}
 
 export class ModelAssistantResponder implements AssistantResponderPort {
   private readonly maxAgentTurns = 4
@@ -88,6 +94,46 @@ export class ModelAssistantResponder implements AssistantResponderPort {
             },
           ),
           done: false,
+        }
+
+        const approvalDecision = this.resolveApprovalDecision(
+          toolCall.name,
+          toolCall.input,
+          command.toolCatalog,
+        )
+
+        if (approvalDecision.required) {
+          const approvalReason =
+            approvalDecision.reason ??
+            (this.i18n.locale === 'en'
+              ? 'This tool call needs user approval before execution.'
+              : '该工具调用需要先获得用户审批后才能执行。')
+
+          this.logger.info('Blocked assistant tool call pending approval', {
+            toolId: toolCall.name,
+            mode: command.session.mode,
+            reason: approvalReason,
+          })
+
+          yield {
+            kind: 'transcript',
+            delta: '',
+            transcript: createCliCommandOutputContent(approvalReason, {
+              title: `${this.i18n.t('transcript.tools')} · ${toolCall.name}`,
+              tone: 'warning',
+            }),
+            done: false,
+          }
+
+          yield {
+            kind: 'text',
+            delta:
+              this.i18n.locale === 'en'
+                ? `I paused before running ${toolCall.name} because approval is required. ${approvalReason}`
+                : `我已在执行 ${toolCall.name} 前暂停，因为它需要审批。${approvalReason}`,
+            done: true,
+          }
+          return
         }
 
         const toolResult = await this.toolExecutor.execute({
@@ -244,11 +290,56 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       '## Tool Calling Protocol',
       `When you need a tool, respond with exactly one ${'<adnify_tool_call name="tool-id">...</adnify_tool_call>'} block and nothing else.`,
       'The inner content must be valid JSON.',
+      'Safe read-only tools can run directly. Careful and dangerous actions may be paused for approval before execution.',
       'For file-ops, use JSON like {"action":"read","path":"src/main.tsx"}, {"action":"list","path":"src"}, {"action":"write","path":"src/example.ts","content":"...","allowWrite":true}, or {"action":"update","path":"src/example.ts","oldText":"before","newText":"after","allowWrite":true}.',
       'For shell-runner, use JSON like {"argv":["rg","query","src"]}.',
       'After the tool result is returned, continue the task normally.',
       'Available executable tools in this build: workspace-read, search-index, file-ops, shell-runner.',
     ].join('\n')
+  }
+
+  private resolveApprovalDecision(
+    toolId: string,
+    input: string,
+    toolCatalog: ToolDescriptor[],
+  ): ApprovalDecision {
+    const descriptor = toolCatalog.find((tool) => tool.id === toolId)
+
+    if (descriptor?.riskLevel === 'dangerous') {
+      return {
+        required: true,
+        reason:
+          this.i18n.locale === 'en'
+            ? `${descriptor.name} is marked as dangerous and is paused until an approval flow is implemented.`
+            : `${descriptor.name} 被标记为 dangerous，在审批流正式完成前会先暂停执行。`,
+      }
+    }
+
+    if (toolId !== 'file-ops') {
+      return { required: false }
+    }
+
+    let action = 'read'
+    try {
+      const parsed = JSON.parse(input) as { action?: unknown }
+      if (typeof parsed.action === 'string' && parsed.action.trim()) {
+        action = parsed.action.trim().toLowerCase()
+      }
+    } catch {
+      return { required: false }
+    }
+
+    if (action === 'write' || action === 'update' || action === 'patch') {
+      return {
+        required: true,
+        reason:
+          this.i18n.locale === 'en'
+            ? `file-ops action "${action}" changes workspace files and is paused until the approval flow is implemented.`
+            : `file-ops 的 "${action}" 操作会修改工作区文件，在审批流完成前会先暂停执行。`,
+      }
+    }
+
+    return { required: false }
   }
 
   private truncateForTranscript(content: string, maxLength: number): string {
