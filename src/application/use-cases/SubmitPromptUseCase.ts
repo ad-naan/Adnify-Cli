@@ -201,9 +201,7 @@ export class SubmitPromptUseCase {
         session.addAssistantMessage(
           this.idGenerator.next(),
           this.clock.now(),
-          `${partial}\n\n[${
-            this.i18n.locale === 'en' ? 'Response interrupted' : '鍝嶅簲涓柇'
-          }]`,
+          `${partial}\n\n[Response interrupted]`,
         )
         await this.sessionRepository.save(session)
       }

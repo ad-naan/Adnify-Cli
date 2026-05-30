@@ -90,9 +90,9 @@ export async function loadModelConfig(options: LoadLocalConfigOptions = {}): Pro
     apiKey: env['ADNIFY_API_KEY'] ?? model.apiKey ?? DEFAULT_MODEL_CONFIG.apiKey,
     baseUrl: env['ADNIFY_BASE_URL'] ?? model.baseUrl ?? DEFAULT_MODEL_CONFIG.baseUrl,
     model: env['ADNIFY_MODEL'] ?? model.model ?? DEFAULT_MODEL_CONFIG.model,
-    maxTokens: model.maxTokens ?? DEFAULT_MODEL_CONFIG.maxTokens,
-    temperature: model.temperature ?? DEFAULT_MODEL_CONFIG.temperature,
-    timeoutMs: model.timeoutMs ?? DEFAULT_MODEL_CONFIG.timeoutMs,
+    maxTokens: normalizeInteger(model.maxTokens, DEFAULT_MODEL_CONFIG.maxTokens, 1, 200_000),
+    temperature: normalizeNumber(model.temperature, DEFAULT_MODEL_CONFIG.temperature, 0, 2),
+    timeoutMs: normalizeInteger(model.timeoutMs, DEFAULT_MODEL_CONFIG.timeoutMs, 1_000, 600_000),
   }
 }
 
@@ -122,4 +122,26 @@ function isMissingFileError(error: unknown): boolean {
     'code' in error &&
     (error as { code?: unknown }).code === 'ENOENT'
   )
+}
+
+function normalizeNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback
+  }
+
+  return Math.max(min, Math.min(max, value))
+}
+
+function normalizeInteger(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  return Math.trunc(normalizeNumber(value, fallback, min, max))
 }

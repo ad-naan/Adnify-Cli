@@ -64,4 +64,31 @@ describe('loadLocalConfig', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test('should clamp unsafe numeric model settings from config files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'adnify-config-'))
+    const configPath = join(root, 'config.json')
+
+    try {
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          model: {
+            maxTokens: -10,
+            temperature: 9,
+            timeoutMs: 1,
+          },
+        }),
+        'utf8',
+      )
+
+      const modelConfig = await loadModelConfig({ configPath })
+
+      expect(modelConfig.maxTokens).toBe(1)
+      expect(modelConfig.temperature).toBe(2)
+      expect(modelConfig.timeoutMs).toBe(1000)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

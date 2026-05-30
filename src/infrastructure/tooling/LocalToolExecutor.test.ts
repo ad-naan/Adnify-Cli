@@ -83,6 +83,19 @@ describe('LocalToolExecutor', () => {
     expect(result.content).toContain('Missing required field "argv"')
   })
 
+  test('should reject malformed tool input json without throwing', async () => {
+    const executor = new LocalToolExecutor()
+
+    const result = await executor.execute({
+      toolId: 'shell-runner',
+      input: '{"argv":',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('valid JSON object')
+  })
+
   test('should return workspace summary for workspace-read', async () => {
     const executor = new LocalToolExecutor()
 

@@ -71,6 +71,22 @@ export class LocalToolExecutor implements ToolExecutorPort {
   constructor(private readonly execRunner: ExecRunner = execFileAsync) {}
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    try {
+      return await this.executeKnownTool(request)
+    } catch (error) {
+      if (error instanceof ToolInputError) {
+        return {
+          toolId: request.toolId,
+          ok: false,
+          content: error.message,
+        }
+      }
+
+      throw error
+    }
+  }
+
+  private async executeKnownTool(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
     switch (request.toolId) {
       case 'workspace-read':
         return this.executeWorkspaceRead(request)
@@ -837,9 +853,11 @@ function parseJsonObject(input: string): Record<string, unknown> {
       ? (parsed as Record<string, unknown>)
       : {}
   } catch {
-    return {}
+    throw new ToolInputError('Tool input must be valid JSON object text.')
   }
 }
+
+class ToolInputError extends Error {}
 
 function resolveWorkspacePath(rootPath: string, candidatePath: string): string | null {
   const workspaceRoot = resolve(rootPath)

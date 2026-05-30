@@ -3,9 +3,9 @@ import { createAppI18n, resolveAppLocale, resolveAppLocaleFromEnv } from './AppI
 
 describe('AppI18n', () => {
   test('should resolve locale aliases', () => {
-    expect(resolveAppLocale('zh')).toBe('zh-CN')
+    expect(resolveAppLocale('zh')).toBe('en')
     expect(resolveAppLocale('en-US')).toBe('en')
-    expect(resolveAppLocale('fr-FR')).toBe('zh-CN')
+    expect(resolveAppLocale('fr-FR')).toBe('en')
   })
 
   test('should resolve locale from environment with ADNIFY_LOCALE priority', () => {

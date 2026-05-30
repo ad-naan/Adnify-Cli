@@ -707,20 +707,20 @@ export function createAppI18n(locale: AppLocale): AppI18n {
 
 export function resolveAppLocale(input?: string | null): AppLocale {
   if (!input) {
-    return 'zh-CN'
+    return 'en'
   }
 
   const normalized = input.toLowerCase()
 
   if (normalized.startsWith('zh')) {
-    return 'zh-CN'
+    return 'en'
   }
 
   if (normalized.startsWith('en')) {
     return 'en'
   }
 
-  return 'zh-CN'
+  return 'en'
 }
 
 export function resolveAppLocaleFromEnv(
@@ -740,7 +740,7 @@ export function resolveAppLocaleFromEnv(
     }
   }
 
-  return 'zh-CN'
+  return 'en'
 }
 
 function getRuntimeLocale(): string | undefined {
