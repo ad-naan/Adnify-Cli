@@ -1,622 +1,98 @@
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { dirname, extname, join, relative, resolve } from 'node:path'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { relative } from 'node:path'
+import type { ToolApprovalPort } from '../../application/ports/ToolApprovalPort'
 import type {
   ToolExecutionRequest,
   ToolExecutionResult,
+  ToolExecutorPort,
 } from '../../application/ports/ToolExecutorPort'
-import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
+import {
+  classifyFileOpsRisk,
+  requiresApproval,
+} from '../../domain/tooling/services/ToolApprovalPolicy'
+import type { ToolActionIntent } from '../../domain/tooling/value-objects/ToolApproval'
+import { isApprovedDecision } from '../../domain/tooling/value-objects/ToolApproval'
+import { autoApproveToolApproval } from './PendingToolApprovalAdapter'
+import { parseFileOpsRequest, runFileOps } from './handlers/fileOpsHandler'
+import { handleSearchIndex } from './handlers/searchIndexHandler'
+import { parseShellRunnerRequest, runShellCommand } from './handlers/shellRunnerHandler'
+import { toolFailure } from './handlers/ToolHandler'
+import { handleWorkspaceRead } from './handlers/workspaceReadHandler'
 
-const execFileAsync = promisify(execFile)
-const DEFAULT_SEARCH_LIMIT = 8
-const MAX_SCAN_FILES = 200
-const MAX_DIRECTORY_ENTRIES = 40
-const MAX_FILE_READ_CHARS = 12_000
-const MAX_FILE_WRITE_CHARS = 80_000
-const TEXT_EXTENSIONS = new Set([
-  '.ts',
-  '.tsx',
-  '.js',
-  '.jsx',
-  '.json',
-  '.md',
-  '.txt',
-  '.yml',
-  '.yaml',
-  '.toml',
-  '.css',
-  '.scss',
-  '.html',
-  '.sh',
-  '.ps1',
-  '.env',
-])
-const ALLOWED_TEXT_FILENAMES = new Set([
-  'readme',
-  'license',
-  '.gitignore',
-  '.gitattributes',
-  '.npmrc',
-  '.prettierrc',
-  '.prettierignore',
-  '.eslintrc',
-  '.eslintignore',
-  '.editorconfig',
-  '.env',
-  '.env.example',
-  '.rules',
-])
-
+/**
+ * 工具调度入口。
+ *
+ * 分派到 handler，并在动作真正发生前统一做审批判定 —— 审批集中在这一层，
+ * 因为只有解析完 payload 才知道「这是读还是写」「这条命令具体是什么」。
+ */
 export class LocalToolExecutor implements ToolExecutorPort {
+  constructor(private readonly approval: ToolApprovalPort = autoApproveToolApproval) {}
+
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
     switch (request.toolId) {
       case 'workspace-read':
-        return this.executeWorkspaceRead(request)
+        return handleWorkspaceRead(request)
       case 'search-index':
-        return this.executeSearchIndex(request)
+        return handleSearchIndex(request)
       case 'file-ops':
         return this.executeFileOps(request)
       case 'shell-runner':
         return this.executeShellRunner(request)
       default:
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: `Tool "${request.toolId}" is not implemented yet.`,
-        }
-    }
-  }
-
-  private async executeWorkspaceRead(
-    request: ToolExecutionRequest,
-  ): Promise<ToolExecutionResult> {
-    const prompt = parseJsonObject(request.input)
-    const focus = typeof prompt.focus === 'string' ? prompt.focus : 'workspace'
-    const entries = request.workspace.topLevelEntries.slice(0, 12).join(', ') || '(empty)'
-
-    return {
-      toolId: request.toolId,
-      ok: true,
-      content: [
-        `Focus: ${focus}`,
-        `Root: ${request.workspace.rootPath}`,
-        `Git: ${request.workspace.isGitRepository ? 'yes' : 'no'}`,
-        `Package manager: ${request.workspace.packageManager}`,
-        `Top-level entries: ${entries}`,
-      ].join('\n'),
-    }
-  }
-
-  private async executeSearchIndex(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
-    const prompt = parseJsonObject(request.input)
-    const query = typeof prompt.query === 'string' ? prompt.query.trim() : ''
-    const limit =
-      typeof prompt.limit === 'number' && Number.isFinite(prompt.limit)
-        ? Math.max(1, Math.min(20, Math.trunc(prompt.limit)))
-        : DEFAULT_SEARCH_LIMIT
-
-    if (!query) {
-      return {
-        toolId: request.toolId,
-        ok: false,
-        content: 'Missing required field "query".',
-      }
-    }
-
-    const rgResult = await this.tryRipgrepSearch(request.workspace.rootPath, query, limit)
-    if (rgResult) {
-      return {
-        toolId: request.toolId,
-        ok: true,
-        content: rgResult,
-      }
-    }
-
-    return {
-      toolId: request.toolId,
-      ok: true,
-      content: await this.fallbackSearch(request.workspace.rootPath, query, limit),
+        return toolFailure(request.toolId, `Tool "${request.toolId}" is not implemented yet.`)
     }
   }
 
   private async executeFileOps(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
-    const prompt = parseJsonObject(request.input)
-    const action = typeof prompt.action === 'string' ? prompt.action.trim().toLowerCase() : 'read'
-    const rawPath = typeof prompt.path === 'string' ? prompt.path.trim() : '.'
-
-    const resolvedPath = resolveWorkspacePath(request.workspace.rootPath, rawPath)
-    if (!resolvedPath) {
-      return {
-        toolId: request.toolId,
-        ok: false,
-        content: 'Path must stay inside the current workspace.',
-      }
+    const parsed = parseFileOpsRequest(request)
+    if (!parsed.ok) {
+      return parsed.result
     }
 
-    if (action === 'read') {
-      try {
-        const fileInfo = await stat(resolvedPath)
-        if (!fileInfo.isFile()) {
-          return {
-            toolId: request.toolId,
-            ok: false,
-            content: 'The requested path is not a file.',
-          }
-        }
-
-        const content = await readFile(resolvedPath, 'utf8')
-        const relativePath = relative(request.workspace.rootPath, resolvedPath) || '.'
-        const truncated =
-          content.length > MAX_FILE_READ_CHARS
-            ? `${content.slice(0, MAX_FILE_READ_CHARS)}\n\n[truncated]`
-            : content
-
-        return {
-          toolId: request.toolId,
-          ok: true,
-          content: [`File: ${relativePath}`, '', truncated].join('\n'),
-        }
-      } catch (error) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: error instanceof Error ? error.message : 'Failed to read the file.',
-        }
-      }
-    }
-
-    if (action === 'list') {
-      try {
-        const directoryInfo = await stat(resolvedPath)
-        if (!directoryInfo.isDirectory()) {
-          return {
-            toolId: request.toolId,
-            ok: false,
-            content: 'The requested path is not a directory.',
-          }
-        }
-
-        const entries = await readdir(resolvedPath, { withFileTypes: true })
-        const lines = entries
-          .filter((entry) => entry.name !== '.git' && entry.name !== 'node_modules')
-          .slice(0, MAX_DIRECTORY_ENTRIES)
-          .map((entry) => `${entry.isDirectory() ? 'dir ' : 'file'} ${entry.name}`)
-
-        return {
-          toolId: request.toolId,
-          ok: true,
-          content: [
-            `Directory: ${relative(request.workspace.rootPath, resolvedPath) || '.'}`,
-            ...lines,
-          ].join('\n'),
-        }
-      } catch (error) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: error instanceof Error ? error.message : 'Failed to list the directory.',
-        }
-      }
-    }
-
-    if (action === 'write') {
-      const content = typeof prompt.content === 'string' ? prompt.content : null
-      const allowWrite = prompt.allowWrite === true
-
-      if (!allowWrite) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content:
-            'Write access requires explicit confirmation in the payload. Use {"action":"write","path":"...","content":"...","allowWrite":true}.',
-        }
-      }
-
-      if (content === null) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: 'Missing required field "content" for file-ops write.',
-        }
-      }
-
-      if (!isLikelyTextPath(resolvedPath)) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: 'Only text-like files can be written in this build.',
-        }
-      }
-
-      if (content.length > MAX_FILE_WRITE_CHARS) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: `Write content is too large. Limit: ${MAX_FILE_WRITE_CHARS} characters.`,
-        }
-      }
-
-      try {
-        await mkdir(dirname(resolvedPath), { recursive: true })
-        await writeFile(resolvedPath, content, 'utf8')
-
-        const relativePath = relative(request.workspace.rootPath, resolvedPath) || '.'
-        return {
-          toolId: request.toolId,
-          ok: true,
-          content: [
-            `File written: ${relativePath}`,
-            `Characters: ${content.length}`,
-          ].join('\n'),
-        }
-      } catch (error) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: error instanceof Error ? error.message : 'Failed to write the file.',
-        }
-      }
-    }
-
-    if (action === 'update' || action === 'patch') {
-      const allowWrite = prompt.allowWrite === true
-      const oldText = typeof prompt.oldText === 'string' ? prompt.oldText : null
-      const newText = typeof prompt.newText === 'string' ? prompt.newText : null
-      const replaceAll = prompt.replaceAll === true
-      const expectedCount =
-        typeof prompt.expectedCount === 'number' && Number.isFinite(prompt.expectedCount)
-          ? Math.max(1, Math.trunc(prompt.expectedCount))
-          : replaceAll
-            ? undefined
-            : 1
-
-      if (!allowWrite) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content:
-            'Patch access requires explicit confirmation in the payload. Use {"action":"update","path":"...","oldText":"...","newText":"...","allowWrite":true}.',
-        }
-      }
-
-      if (oldText === null || newText === null) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: 'Missing required fields "oldText" and/or "newText" for file-ops update.',
-        }
-      }
-
-      if (!oldText) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: 'Field "oldText" cannot be empty for file-ops update.',
-        }
-      }
-
-      if (!isLikelyTextPath(resolvedPath)) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: 'Only text-like files can be patched in this build.',
-        }
-      }
-
-      try {
-        const fileInfo = await stat(resolvedPath)
-        if (!fileInfo.isFile()) {
-          return {
-            toolId: request.toolId,
-            ok: false,
-            content: 'The requested path is not a file.',
-          }
-        }
-
-        const currentContent = await readFile(resolvedPath, 'utf8')
-        const matchCount = countOccurrences(currentContent, oldText)
-
-        if (matchCount === 0) {
-          return {
-            toolId: request.toolId,
-            ok: false,
-            content: 'No matching content found for file-ops update.',
-          }
-        }
-
-        if (expectedCount !== undefined && matchCount !== expectedCount) {
-          return {
-            toolId: request.toolId,
-            ok: false,
-            content: `Expected ${expectedCount} match(es), but found ${matchCount}.`,
-          }
-        }
-
-        const nextContent = replaceAll
-          ? currentContent.split(oldText).join(newText)
-          : replaceFirst(currentContent, oldText, newText)
-
-        if (nextContent.length > MAX_FILE_WRITE_CHARS) {
-          return {
-            toolId: request.toolId,
-            ok: false,
-            content: `Patched content is too large. Limit: ${MAX_FILE_WRITE_CHARS} characters.`,
-          }
-        }
-
-        await writeFile(resolvedPath, nextContent, 'utf8')
-
-        const relativePath = relative(request.workspace.rootPath, resolvedPath) || '.'
-        return {
-          toolId: request.toolId,
-          ok: true,
-          content: [
-            `File updated: ${relativePath}`,
-            `Replacements: ${replaceAll ? matchCount : 1}`,
-          ].join('\n'),
-        }
-      } catch (error) {
-        return {
-          toolId: request.toolId,
-          ok: false,
-          content: error instanceof Error ? error.message : 'Failed to update the file.',
-        }
-      }
-    }
-
-    return {
+    const { action, resolvedPath } = parsed.value
+    const targetPath = toRelativePath(request.workspace.rootPath, resolvedPath)
+    const denial = await this.ensureApproved({
       toolId: request.toolId,
-      ok: false,
-      content: 'Unsupported file-ops action. Supported: read, list, write, update, patch.',
-    }
+      riskLevel: classifyFileOpsRisk(action),
+      summary: `${action} ${targetPath}`,
+      targetPath,
+    })
+
+    return denial ?? runFileOps(parsed.value)
   }
 
-  private async executeShellRunner(
-    request: ToolExecutionRequest,
-  ): Promise<ToolExecutionResult> {
-    const prompt = parseJsonObject(request.input)
-    const argv = Array.isArray(prompt.argv)
-      ? prompt.argv.filter((value): value is string => typeof value === 'string' && value.length > 0)
-      : []
-
-    if (argv.length === 0) {
-      return {
-        toolId: request.toolId,
-        ok: false,
-        content:
-          'Missing required field "argv". Example: {"argv":["rg","useCliController","src"]}',
-      }
+  private async executeShellRunner(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    const parsed = parseShellRunnerRequest(request)
+    if (!parsed.ok) {
+      return parsed.result
     }
 
-    const validation = validateReadonlyCommand(argv)
-    if (!validation.ok) {
-      return {
-        toolId: request.toolId,
-        ok: false,
-        content: validation.reason,
-      }
-    }
+    const { riskLevel, summary } = parsed.value.classification
+    const denial = await this.ensureApproved({ toolId: request.toolId, riskLevel, summary })
 
-    try {
-      const { stdout, stderr } = await execFileAsync(argv[0]!, argv.slice(1), {
-        cwd: request.workspace.rootPath,
-        windowsHide: true,
-        maxBuffer: 1024 * 1024,
-      })
-
-      const output = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n')
-      return {
-        toolId: request.toolId,
-        ok: true,
-        content: output || 'Command completed with no output.',
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Shell command execution failed.'
-      return {
-        toolId: request.toolId,
-        ok: false,
-        content: message,
-      }
-    }
+    return denial ?? runShellCommand(parsed.value)
   }
 
-  private async tryRipgrepSearch(
-    rootPath: string,
-    query: string,
-    limit: number,
-  ): Promise<string | null> {
-    try {
-      const { stdout } = await execFileAsync(
-        'rg',
-        ['--line-number', '--no-heading', '--color', 'never', '--max-count', String(limit), query, '.'],
-        { cwd: rootPath, windowsHide: true, maxBuffer: 1024 * 1024 },
-      )
-
-      const trimmed = stdout.trim()
-      return trimmed || 'No matches found.'
-    } catch {
+  /**
+   * 需要审批时等待用户决定。
+   * 被拒绝时返回失败结果而不是抛异常 —— 模型能读到拒绝原因并改用别的方案，整轮对话不中断。
+   */
+  private async ensureApproved(intent: ToolActionIntent): Promise<ToolExecutionResult | null> {
+    if (!requiresApproval(intent)) {
       return null
     }
-  }
 
-  private async fallbackSearch(rootPath: string, query: string, limit: number): Promise<string> {
-    const files = await collectSearchableFiles(rootPath, MAX_SCAN_FILES)
-    const matches: string[] = []
-
-    for (const filePath of files) {
-      if (matches.length >= limit) {
-        break
-      }
-
-      let content: string
-      try {
-        content = await readFile(filePath, 'utf8')
-      } catch {
-        continue
-      }
-
-      const lines = content.split(/\r?\n/g)
-      for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index]
-        if (!line || !line.includes(query)) {
-          continue
-        }
-
-        matches.push(`${relative(rootPath, filePath)}:${index + 1}:${line.trim()}`)
-        if (matches.length >= limit) {
-          break
-        }
-      }
+    const decision = await this.approval.requestApproval(intent)
+    if (isApprovedDecision(decision)) {
+      return null
     }
 
-    return matches.length > 0 ? matches.join('\n') : 'No matches found.'
+    return toolFailure(
+      intent.toolId,
+      `The user denied this operation: ${intent.summary}. Do not retry it; explain the situation or propose a different approach.`,
+    )
   }
 }
 
-async function collectSearchableFiles(rootPath: string, limit: number): Promise<string[]> {
-  const queue = [resolve(rootPath)]
-  const files: string[] = []
-
-  while (queue.length > 0 && files.length < limit) {
-    const current = queue.shift()
-    if (!current) {
-      continue
-    }
-
-    let entries
-    try {
-      entries = await readdir(current, { withFileTypes: true })
-    } catch {
-      continue
-    }
-
-    for (const entry of entries) {
-      if (files.length >= limit) {
-        break
-      }
-
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') {
-        continue
-      }
-
-      const nextPath = join(current, entry.name)
-      if (entry.isDirectory()) {
-        queue.push(nextPath)
-        continue
-      }
-
-      if (TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
-        files.push(nextPath)
-      }
-    }
-  }
-
-  return files
-}
-
-function parseJsonObject(input: string): Record<string, unknown> {
-  if (!input.trim()) {
-    return {}
-  }
-
-  try {
-    const parsed = JSON.parse(input)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {}
-  } catch {
-    return {}
-  }
-}
-
-function resolveWorkspacePath(rootPath: string, candidatePath: string): string | null {
-  const workspaceRoot = resolve(rootPath)
-  const nextPath = resolve(workspaceRoot, candidatePath || '.')
-
-  if (nextPath === workspaceRoot) {
-    return nextPath
-  }
-
-  return nextPath.startsWith(`${workspaceRoot}\\`) || nextPath.startsWith(`${workspaceRoot}/`)
-    ? nextPath
-    : null
-}
-
-function isLikelyTextPath(filePath: string): boolean {
-  const normalizedName = filePath.split(/[\\/]/).pop()?.toLowerCase() ?? ''
-  const extension = extname(normalizedName)
-
-  if (TEXT_EXTENSIONS.has(extension)) {
-    return true
-  }
-
-  if (ALLOWED_TEXT_FILENAMES.has(normalizedName)) {
-    return true
-  }
-
-  return normalizedName.startsWith('.')
-}
-
-function replaceFirst(content: string, oldText: string, newText: string): string {
-  const matchIndex = content.indexOf(oldText)
-  if (matchIndex === -1) {
-    return content
-  }
-
-  return (
-    content.slice(0, matchIndex) +
-    newText +
-    content.slice(matchIndex + oldText.length)
-  )
-}
-
-function countOccurrences(content: string, search: string): number {
-  let count = 0
-  let currentIndex = 0
-
-  while (currentIndex <= content.length) {
-    const matchIndex = content.indexOf(search, currentIndex)
-    if (matchIndex === -1) {
-      break
-    }
-
-    count += 1
-    currentIndex = matchIndex + search.length
-  }
-
-  return count
-}
-
-function validateReadonlyCommand(
-  argv: string[],
-): { ok: true } | { ok: false; reason: string } {
-  const command = argv[0]?.toLowerCase()
-  if (!command) {
-    return { ok: false, reason: 'Missing command name.' }
-  }
-
-  if (command === 'rg') {
-    return { ok: true }
-  }
-
-  if (command === 'git') {
-    const subcommand = argv[1]?.toLowerCase()
-    const allowed = new Set(['status', 'diff', 'log', 'show', 'branch', 'rev-parse'])
-    if (!subcommand || !allowed.has(subcommand)) {
-      return {
-        ok: false,
-        reason:
-          'Only read-only git commands are allowed: status, diff, log, show, branch, rev-parse.',
-      }
-    }
-
-    return { ok: true }
-  }
-
-  return {
-    ok: false,
-    reason: 'Only read-only commands are allowed in this build. Supported: rg, git status/diff/log/show/branch/rev-parse.',
-  }
+function toRelativePath(rootPath: string, resolvedPath: string): string {
+  return relative(rootPath, resolvedPath) || '.'
 }

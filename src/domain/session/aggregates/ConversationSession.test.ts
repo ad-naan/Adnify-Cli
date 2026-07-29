@@ -8,7 +8,7 @@ describe('ConversationSession', () => {
       id: 'session-1',
       title: 'demo',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt,
     })
 
@@ -28,7 +28,7 @@ describe('ConversationSession', () => {
       id: 'session-2',
       title: 'demo',
       mode: 'chat',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-04-13T12:00:00.000Z'),
     })
 
@@ -45,7 +45,7 @@ describe('ConversationSession', () => {
       id: 'session-3',
       title: 'demo',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt,
     })
 

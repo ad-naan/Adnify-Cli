@@ -11,15 +11,15 @@
 
 ## 规则文件
 
-- [00-core.md](E:\26Project\Adnify-Cli\.rules\00-core.md)
+- [00-core.md](./00-core.md)
   核心协作原则与总约束
-- [10-architecture.md](E:\26Project\Adnify-Cli\.rules\10-architecture.md)
+- [10-architecture.md](./10-architecture.md)
   DDD 分层、目录边界、依赖方向与模块拆分规范
-- [20-coding-style.md](E:\26Project\Adnify-Cli\.rules\20-coding-style.md)
+- [20-coding-style.md](./20-coding-style.md)
   TypeScript、Bun、Ink、命名、注释、复用与禁止事项
-- [30-delivery-workflow.md](E:\26Project\Adnify-Cli\.rules\30-delivery-workflow.md)
+- [30-delivery-workflow.md](./30-delivery-workflow.md)
   Vibecoding 的实施流程、提交流程、验证要求与变更边界
-- [40-ai-collaboration.md](E:\26Project\Adnify-Cli\.rules\40-ai-collaboration.md)
+- [40-ai-collaboration.md](./40-ai-collaboration.md)
   面向 AI / 代理协作的直接执行规则
 
 ## 使用方式

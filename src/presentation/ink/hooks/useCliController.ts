@@ -7,6 +7,7 @@ import type { ConversationSession } from '../../../domain/session/aggregates/Con
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import type { CommandSuggestionItem } from '../components/CommandSuggestionList'
 import { useConfigInit } from './useConfigInit'
+import { useToolApproval } from './useToolApproval'
 
 export interface UseCliControllerParams {
   runtime: AdnifyCliRuntime
@@ -24,6 +25,7 @@ export interface CliControllerState {
   isBooting: boolean
   isBusy: boolean
   configInitPrompt: string
+  toolApprovalPrompt: string
   commandSuggestions: CommandSuggestionItem[]
   selectedSuggestionIndex: number
   isSuggestionOpen: boolean
@@ -97,6 +99,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const streamingBufferRef = useRef('')
   const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const configInit = useConfigInit(i18n)
+  const toolApproval = useToolApproval(params.runtime.toolApproval, i18n)
 
   const flushStreamingBuffer = useCallback(() => {
     if (streamingFlushTimerRef.current) {
@@ -505,6 +508,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           activeAbortControllerRef.current.abort(new Error('user-abort'))
           setStatusLine(i18n.t('status.executionAborting'))
         }
+        // 有在途审批时必须一并拒绝，否则工具那边的 promise 永不 resolve、isBusy 卡死。
+        toolApproval.denyAll()
         return
       }
 
@@ -529,6 +534,27 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         setInputValue('')
         setSelectedSuggestionIndex(0)
       }
+      return
+    }
+
+    // 审批面板活跃时，只处理 y/n/a 单键；忽略方向键、补全等全部快捷键。
+    if (toolApproval.isActive) {
+      // 只接受单个字符，且非控制键。
+      if (!key.ctrl && !key.meta && input.length === 1 && !key.return) {
+        const statusMessage = toolApproval.handleInput(input)
+        if (statusMessage) {
+          setStreamingMessages((previous) => [
+            ...previous,
+            new ConversationMessage({
+              id: `approval-${Date.now()}`,
+              role: 'system',
+              content: statusMessage,
+              createdAt: new Date(),
+            }),
+          ])
+        }
+      }
+
       return
     }
 
@@ -612,6 +638,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     navigateHistory,
     params,
     exitHistoryNavigation,
+    toolApproval,
+    session,
   ])
 
   return {
@@ -627,6 +655,12 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       ? configInit.promptText +
         (configInit.errorText
           ? `\n${i18n.t('conversation.configError', { message: configInit.errorText })}`
+          : '')
+      : '',
+    toolApprovalPrompt: toolApproval.isActive
+      ? toolApproval.promptText +
+        (toolApproval.errorText
+          ? `\n${i18n.t('conversation.configError', { message: toolApproval.errorText })}`
           : '')
       : '',
     commandSuggestions,

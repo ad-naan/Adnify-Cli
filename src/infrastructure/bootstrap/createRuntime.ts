@@ -25,6 +25,7 @@ import { resolveAppStorage } from '../storage/resolveAppStorage'
 import { CryptoIdGenerator } from '../system/CryptoIdGenerator'
 import { SystemClock } from '../system/SystemClock'
 import { LocalToolExecutor } from '../tooling/LocalToolExecutor'
+import { PendingToolApprovalAdapter } from '../tooling/PendingToolApprovalAdapter'
 import { LocalWorkspaceContextService } from '../workspace/LocalWorkspaceContextService'
 import { resolveUiPreferences } from './resolveUiPreferences'
 
@@ -42,7 +43,8 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const idGenerator = new CryptoIdGenerator()
   const clock = new SystemClock()
   const workspaceContextService = new LocalWorkspaceContextService()
-  const toolExecutor = new LocalToolExecutor()
+  const toolApproval = new PendingToolApprovalAdapter()
+  const toolExecutor = new LocalToolExecutor(toolApproval)
 
   const promptBundle = await loadPromptBundle()
   config.setPromptBundle(promptBundle)
@@ -138,6 +140,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     },
     switchModel,
     applyModelConfig: activateModelConfig,
+    toolApproval,
   }
 }
 

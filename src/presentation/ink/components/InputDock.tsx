@@ -16,6 +16,7 @@ export interface InputDockProps {
   mode: AssistantMode
   modelLabel: string
   configInitPrompt?: string
+  toolApprovalPrompt?: string
   commandSuggestions: CommandSuggestionItem[]
   selectedSuggestionIndex: number
   isSuggestionOpen: boolean
