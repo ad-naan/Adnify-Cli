@@ -98,7 +98,7 @@ function buildPromptText(intent: ToolActionIntent, i18n: AppI18n): string {
     lines.push(`  ${i18n.t('approval.targetLabel', { value: intent.targetPath })}`)
   }
 
-  lines.push('', i18n.t('approval.instruction'))
+  // 按键说明由 InputDock 单独渲染在面板底部，这里不再重复。
   return lines.join('\n')
 }
 

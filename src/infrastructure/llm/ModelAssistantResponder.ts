@@ -246,6 +246,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       'The inner content must be valid JSON.',
       'For file-ops, use JSON like {"action":"read","path":"src/main.tsx"}, {"action":"list","path":"src"}, {"action":"write","path":"src/example.ts","content":"...","allowWrite":true}, or {"action":"update","path":"src/example.ts","oldText":"before","newText":"after","allowWrite":true}.',
       'For shell-runner, use JSON like {"argv":["rg","query","src"]}.',
+      'Shell commands are restricted to a whitelist: rg, git status/diff/log/show/branch/rev-parse (no approval needed), plus bun test, bun run build/typecheck/test/lint, bunx tsc (approval required).',
+      'Risky actions pause for user approval: file-ops write/update/patch, and the verification commands above. If a result says the user denied the action, do not retry the same call — explain your intent and propose a different approach.',
       'After the tool result is returned, continue the task normally.',
       'Available executable tools in this build: workspace-read, search-index, file-ops, shell-runner.',
     ].join('\n')
