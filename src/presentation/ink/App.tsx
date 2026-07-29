@@ -52,13 +52,13 @@ export function App(props: AppProps) {
   const headerRows = showEmptyState ? 0 : 7
   const inputRows = controller.configInitPrompt
     ? 14
-    : controller.approvalPrompt
-      ? 13
-    : controller.isSuggestionOpen
+    : controller.toolApprovalPrompt
       ? 12
-      : controller.isBusy
-        ? 7
-        : 8
+      : controller.isSuggestionOpen
+        ? 12
+        : controller.isBusy
+          ? 7
+          : 8
   const statusRows = controller.isBusy ? 0 : 2
   const layoutGapRows = showEmptyState ? 1 : 2
   const safetyRows = 2
@@ -81,6 +81,7 @@ export function App(props: AppProps) {
       <Box width="100%" flexDirection="column" paddingX={1}>
         <HeaderBar
           appName="Adnify-Cli"
+          author="adnaan"
           tagline={i18n.t('assistant.tagline')}
           workspaceName={i18n.t('app.boot.workspaceName')}
           packageManager="bun"
@@ -185,7 +186,7 @@ export function App(props: AppProps) {
           mode={controller.session.mode}
           modelLabel={modelLabel}
           configInitPrompt={controller.configInitPrompt}
-          approvalPrompt={controller.approvalPrompt}
+          toolApprovalPrompt={controller.toolApprovalPrompt}
           commandSuggestions={controller.commandSuggestions}
           selectedSuggestionIndex={controller.selectedSuggestionIndex}
           isSuggestionOpen={controller.isSuggestionOpen}

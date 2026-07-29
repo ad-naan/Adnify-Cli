@@ -1,14 +1,13 @@
 import type { Key } from 'ink'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AdnifyCliRuntime } from '../../../application/dto/AdnifyCliRuntime'
 import type { BootstrapSnapshot } from '../../../application/dto/BootstrapSnapshot'
 import type { SessionListItem } from '../../../application/dto/SessionListItem'
-import type { PendingToolApproval } from '../../../application/ports/AssistantResponderPort'
+import type { AdnifyCliRuntime } from '../../../application/dto/AdnifyCliRuntime'
 import type { ConversationSession } from '../../../domain/session/aggregates/ConversationSession'
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import type { CommandSuggestionItem } from '../components/CommandSuggestionList'
-import { formatBootErrorMessage, formatConfigErrorMessage } from './runtimeErrorFormatting'
 import { useConfigInit } from './useConfigInit'
+import { useToolApproval } from './useToolApproval'
 
 export interface UseCliControllerParams {
   runtime: AdnifyCliRuntime
@@ -26,7 +25,7 @@ export interface CliControllerState {
   isBooting: boolean
   isBusy: boolean
   configInitPrompt: string
-  approvalPrompt: string
+  toolApprovalPrompt: string
   commandSuggestions: CommandSuggestionItem[]
   selectedSuggestionIndex: number
   isSuggestionOpen: boolean
@@ -40,11 +39,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':mode agent': 'command.desc.mode.agent',
   ':mode plan': 'command.desc.mode.plan',
   ':workspace': 'command.desc.workspace',
-  ':status': 'command.desc.status',
   ':tools': 'command.desc.tools',
-  ':doctor': 'command.desc.doctor',
-  ':diff': 'command.desc.diff',
-  ':review': 'command.desc.review',
   ':model [provider] [model]': 'command.desc.model',
   ':config': 'command.desc.config',
   ':config init': 'command.desc.configInit',
@@ -77,6 +72,10 @@ function isAbortLikeError(error: unknown): boolean {
   )
 }
 
+/**
+ * Ink 展示层状态桥。
+ * 这里负责把用户输入翻译成用例调用，不直接承载领域规则。
+ */
 export function useCliController(params: UseCliControllerParams): CliControllerState {
   const { i18n } = params.runtime
   const [bootstrap, setBootstrap] = useState<BootstrapSnapshot | null>(null)
@@ -87,7 +86,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const [streamingMessages, setStreamingMessages] = useState<ConversationMessage[]>([])
   const [isBooting, setIsBooting] = useState(true)
   const [isBusy, setIsBusy] = useState(false)
-  const [pendingApproval, setPendingApproval] = useState<PendingToolApproval | null>(null)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0)
   const [recentSessions, setRecentSessions] = useState<SessionListItem[]>([])
   const [isSuggestionDismissed, setIsSuggestionDismissed] = useState(false)
@@ -101,6 +99,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const streamingBufferRef = useRef('')
   const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const configInit = useConfigInit(i18n)
+  const toolApproval = useToolApproval(params.runtime.toolApproval, i18n)
 
   const flushStreamingBuffer = useCallback(() => {
     if (streamingFlushTimerRef.current) {
@@ -217,7 +216,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           return
         }
 
-        setStatusLine(formatBootErrorMessage(i18n, error))
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        setStatusLine(`${i18n.t('app.boot.failed')}: ${message}`)
       } finally {
         if (mounted) {
           setIsBooting(false)
@@ -233,7 +233,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   }, [configInit.start, i18n, params.cwd, params.runtime, refreshRecentSessions])
 
   const commandSuggestions = useMemo<CommandSuggestionItem[]>(() => {
-    if (!bootstrap || pendingApproval) {
+    if (!bootstrap) {
       return []
     }
 
@@ -254,26 +254,10 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           i18n.maybeT(COMMAND_DESCRIPTION_KEYS[command] ?? '') ?? i18n.t('command.desc.default'),
       }))
       .filter((item) => item.command.toLowerCase().startsWith(keyword))
-  }, [bootstrap, i18n, inputValue, pendingApproval])
+  }, [bootstrap, i18n, inputValue])
 
   const isSuggestionOpen =
-    commandSuggestions.length > 0 &&
-    !configInit.isActive &&
-    !pendingApproval &&
-    !isSuggestionDismissed
-
-  const approvalPrompt = useMemo(() => {
-    if (!pendingApproval) {
-      return ''
-    }
-
-    return [
-      `${pendingApproval.toolName} (${pendingApproval.toolId})`,
-      pendingApproval.reason,
-      `input: ${pendingApproval.input}`,
-      i18n.t('input.hintApproval'),
-    ].join('\n')
-  }, [i18n, pendingApproval])
+    commandSuggestions.length > 0 && !configInit.isActive && !isSuggestionDismissed
 
   useEffect(() => {
     if (selectedSuggestionIndex >= commandSuggestions.length) {
@@ -294,18 +278,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     draftInputRef.current = ''
     return true
   }, [commandSuggestions, selectedSuggestionIndex])
-
-  const appendStreamingTranscript = useCallback((content: string) => {
-    setStreamingMessages((previous) => [
-      ...previous,
-      new ConversationMessage({
-        id: `stream-${Date.now()}-${previous.length + 1}`,
-        role: 'system',
-        content,
-        createdAt: new Date(),
-      }),
-    ])
-  }, [])
 
   const commitInputHistory = useCallback((value: string) => {
     const normalized = value.trim()
@@ -380,71 +352,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       nextInput = `:${nextInput.slice(1)}`
     }
 
-    if (pendingApproval) {
-      const decision = nextInput.toLowerCase()
-      if (decision !== 'y' && decision !== 'yes' && decision !== 'n' && decision !== 'no') {
-        setStatusLine(i18n.t('status.approvalChoiceRequired'))
-        return
-      }
-
-      busyRef.current = true
-      setIsBusy(true)
-      setInputValue('')
-      const abortController = new AbortController()
-      activeAbortControllerRef.current = abortController
-      resetStreamingState()
-
-      try {
-        const result = await params.runtime.useCases.submitPrompt.executeApprovalDecision(
-          {
-            sessionId: session.id,
-            approved: decision === 'y' || decision === 'yes',
-            abortSignal: abortController.signal,
-          },
-          {
-            onChunk: (delta) => {
-              queueStreamingChunk(delta)
-            },
-            onDone: () => {
-              flushStreamingBuffer()
-            },
-            onTranscript: appendStreamingTranscript,
-            onApproval: (nextApproval) => {
-              setPendingApproval(nextApproval)
-            },
-            onError: (error) => {
-              flushStreamingBuffer()
-              setStatusLine(
-                isAbortLikeError(error)
-                  ? i18n.t('status.executionAborted')
-                  : i18n.t('status.responseFailed', { message: error.message }),
-              )
-            },
-          },
-        )
-
-        setSession(result.session)
-        resetStreamingState()
-        setPendingApproval(result.pendingApproval ?? null)
-        setStatusLine(result.statusLine)
-        await refreshRecentSessions(bootstrap.workspace.rootPath)
-      } catch (error) {
-        if (isAbortLikeError(error)) {
-          setStatusLine(i18n.t('status.executionAborted'))
-        } else {
-          const message = error instanceof Error ? error.message : 'Unknown error'
-          setStatusLine(i18n.t('status.executionFailed', { message }))
-        }
-        resetStreamingState()
-      } finally {
-        activeAbortControllerRef.current = null
-        busyRef.current = false
-        setIsBusy(false)
-      }
-
-      return
-    }
-
     if (configInit.isActive) {
       busyRef.current = true
       setIsBusy(true)
@@ -457,7 +364,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           setStatusLine(result.message)
         }
       } catch (error) {
-        setStatusLine(formatConfigErrorMessage(i18n, error))
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        setStatusLine(i18n.t('status.configFailed', { message }))
       } finally {
         busyRef.current = false
         setIsBusy(false)
@@ -476,7 +384,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     setInputValue('')
     setSelectedSuggestionIndex(0)
     setIsSuggestionDismissed(false)
-    setPendingApproval(null)
     setHistoryIndex(null)
     draftInputRef.current = ''
     const abortController = new AbortController()
@@ -535,9 +442,16 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           onDone: () => {
             flushStreamingBuffer()
           },
-          onTranscript: appendStreamingTranscript,
-          onApproval: (nextApproval) => {
-            setPendingApproval(nextApproval)
+          onTranscript: (content) => {
+            setStreamingMessages((previous) => [
+              ...previous,
+              new ConversationMessage({
+                id: `stream-${Date.now()}-${previous.length + 1}`,
+                role: 'system',
+                content,
+                createdAt: new Date(),
+              }),
+            ])
           },
           onError: (error) => {
             flushStreamingBuffer()
@@ -552,7 +466,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
 
       setSession(result.session)
       resetStreamingState()
-      setPendingApproval(result.pendingApproval ?? null)
       setStatusLine(result.statusLine)
       await refreshRecentSessions(bootstrap.workspace.rootPath)
     } catch (error) {
@@ -569,18 +482,17 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       setIsBusy(false)
     }
   }, [
-    appendStreamingTranscript,
     bootstrap,
-    commitInputHistory,
+    commandSuggestions,
     configInit,
     flushStreamingBuffer,
     i18n,
     inputValue,
+    isSuggestionOpen,
     params,
-    pendingApproval,
     queueStreamingChunk,
-    refreshRecentSessions,
     resetStreamingState,
+    selectedSuggestionIndex,
     session,
   ])
 
@@ -596,6 +508,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           activeAbortControllerRef.current.abort(new Error('user-abort'))
           setStatusLine(i18n.t('status.executionAborting'))
         }
+        // 有在途审批时必须一并拒绝，否则工具那边的 promise 永不 resolve、isBusy 卡死。
+        toolApproval.denyAll()
         return
       }
 
@@ -623,7 +537,28 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       return
     }
 
-    if (!isSuggestionOpen && !configInit.isActive && !pendingApproval && key.upArrow && !inputValue) {
+    // 审批面板活跃时，只处理 y/n/a 单键；忽略方向键、补全等全部快捷键。
+    if (toolApproval.isActive) {
+      // 只接受单个字符，且非控制键。
+      if (!key.ctrl && !key.meta && input.length === 1 && !key.return) {
+        const statusMessage = toolApproval.handleInput(input)
+        if (statusMessage) {
+          setStreamingMessages((previous) => [
+            ...previous,
+            new ConversationMessage({
+              id: `approval-${Date.now()}`,
+              role: 'system',
+              content: statusMessage,
+              createdAt: new Date(),
+            }),
+          ])
+        }
+      }
+
+      return
+    }
+
+    if (!isSuggestionOpen && !configInit.isActive && key.upArrow && !inputValue) {
       if (navigateHistory('older')) {
         return
       }
@@ -632,7 +567,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     if (
       !isSuggestionOpen &&
       !configInit.isActive &&
-      !pendingApproval &&
       key.downArrow &&
       (!inputValue || historyIndex !== null)
     ) {
@@ -696,7 +630,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     applySelectedSuggestion,
     commandSuggestions.length,
     configInit,
-    exitHistoryNavigation,
     handleSubmit,
     historyIndex,
     i18n,
@@ -704,7 +637,9 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     isSuggestionOpen,
     navigateHistory,
     params,
-    pendingApproval,
+    exitHistoryNavigation,
+    toolApproval,
+    session,
   ])
 
   return {
@@ -722,7 +657,12 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           ? `\n${i18n.t('conversation.configError', { message: configInit.errorText })}`
           : '')
       : '',
-    approvalPrompt,
+    toolApprovalPrompt: toolApproval.isActive
+      ? toolApproval.promptText +
+        (toolApproval.errorText
+          ? `\n${i18n.t('conversation.configError', { message: toolApproval.errorText })}`
+          : '')
+      : '',
     commandSuggestions,
     selectedSuggestionIndex,
     isSuggestionOpen,

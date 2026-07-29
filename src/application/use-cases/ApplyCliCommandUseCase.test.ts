@@ -132,7 +132,7 @@ function createBootstrapSnapshot(): BootstrapSnapshot {
       defaultMode: 'agent',
     }),
     workspace: new WorkspaceContext({
-      rootPath: 'E:/26Project/Adnify-Cli',
+      rootPath: '/workspace/adnify-cli',
       isGitRepository: true,
       packageManager: 'bun',
       topLevelEntries: ['src', 'package.json'],
@@ -205,7 +205,7 @@ describe('ApplyCliCommandUseCase', () => {
       id: 'sess-help',
       title: 'test',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
     await repo.save(session)
@@ -298,7 +298,7 @@ describe('ApplyCliCommandUseCase', () => {
       id: 'sess-clear',
       title: 'test',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
     session.addUserMessage('existing-user', new Date('2026-01-01T00:00:10.000Z'), 'legacy prompt')
@@ -335,7 +335,7 @@ describe('ApplyCliCommandUseCase', () => {
 
   test('should list recent sessions for the current workspace', async () => {
     const repo = createMockSessionRepo()
-    const workspacePath = 'E:/26Project/Adnify-Cli'
+    const workspacePath = '/workspace/adnify-cli'
 
     const older = ConversationSession.create({
       id: 'sess-older',
@@ -383,7 +383,7 @@ describe('ApplyCliCommandUseCase', () => {
 
   test('should resume a session by numeric index', async () => {
     const repo = createMockSessionRepo()
-    const workspacePath = 'E:/26Project/Adnify-Cli'
+    const workspacePath = '/workspace/adnify-cli'
 
     const current = ConversationSession.create({
       id: 'sess-current',
@@ -576,7 +576,7 @@ describe('ApplyCliCommandUseCase', () => {
       id: 'sess-storage',
       title: 'Storage',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
     await repo.save(session)
@@ -665,7 +665,7 @@ describe('ApplyCliCommandUseCase', () => {
       id: 'sess-meta',
       title: 'Current session title',
       mode: 'plan',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
     session.addUserMessage('msg-1', new Date('2026-01-01T00:01:00.000Z'), 'hello')
@@ -876,7 +876,7 @@ describe('ApplyCliCommandUseCase', () => {
       id: 'sess-config',
       title: 'Config',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
     await repo.save(session)

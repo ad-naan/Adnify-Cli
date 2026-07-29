@@ -116,6 +116,21 @@ const messages = {
     'config.savedLine2': '当前模型：{model} ({baseUrl})',
     'config.savedLine3': '现在可以直接开始对话，或使用 :model 继续切换模型。',
 
+    'approval.panelTitle': '工具审批',
+    'approval.title': '{tool} 请求执行以下操作',
+    'approval.riskLabel': '风险等级：{value}',
+    'approval.targetLabel': '目标路径：{value}',
+    'approval.instruction': 'y 批准   n 拒绝   a 本会话内始终允许该工具',
+    'approval.choiceError': '请输入 y、n 或 a',
+    'approval.deniedByUser': '你拒绝了这次操作：{summary}',
+    'approval.approvedStatus': '已批准：{summary}',
+    'approval.deniedStatus': '已拒绝：{summary}',
+    'approval.alwaysApprovedStatus': '已批准，且本会话内不再询问 {tool}',
+
+    'tool.risk.safe': '安全',
+    'tool.risk.careful': '需谨慎',
+    'tool.risk.dangerous': '危险',
+
     'command.desc.default': '执行本地命令',
     'command.desc.help': '查看本地命令列表',
     'command.desc.mode.chat': '切换到 chat 模式',
@@ -447,6 +462,21 @@ const messages = {
     'config.savedLine1': 'Configuration saved to ~/.adnify-cli/config.json',
     'config.savedLine2': 'Current model: {model} ({baseUrl})',
     'config.savedLine3': 'You can start chatting now, or use :model to switch models later.',
+
+    'approval.panelTitle': 'Tool approval',
+    'approval.title': '{tool} wants to run the following operation',
+    'approval.riskLabel': 'Risk level: {value}',
+    'approval.targetLabel': 'Target path: {value}',
+    'approval.instruction': 'y approve   n deny   a always allow this tool in this session',
+    'approval.choiceError': 'Enter y, n, or a',
+    'approval.deniedByUser': 'You denied this operation: {summary}',
+    'approval.approvedStatus': 'Approved: {summary}',
+    'approval.deniedStatus': 'Denied: {summary}',
+    'approval.alwaysApprovedStatus': 'Approved, and {tool} will not ask again this session',
+
+    'tool.risk.safe': 'safe',
+    'tool.risk.careful': 'careful',
+    'tool.risk.dangerous': 'dangerous',
 
     'command.desc.default': 'Run a local command',
     'command.desc.help': 'Show local command list',

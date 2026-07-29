@@ -40,12 +40,13 @@ Adnify-Cli 想做的不是“一个能聊天的 CLI”，而是“一个真正�
 - 支持会话文件化持久化。
 - 支持按工作区自动恢复最近会话。
 - 支持 `:session / :sessions / :resume` 会话管理命令。
-- 支持 `:status / :doctor / :diff / :review` 运行状态与代码检查命令。
 - 支持 `:config` 系列命令进行模型配置。
 - 支持 `:storage` 系列命令管理数据目录。
 - 支持运行时切换模型配置。
 - 支持中英双语国际化基础设施。
 - 支持 Prompt Pack 驱动的系统提示词、模式提示词、工具定义和命令定义。
+- 支持工具调用闭环：模型可调用 `workspace-read / search-index / file-ops / shell-runner` 四个工具，工具过程与结果作为过程消息回流到会话区。
+- 支持风险分级与交互式审批：写文件与执行验证命令前会暂停并等待用户确认。
 - 输入交互已做过一轮接近 `cc` 风格的优化：
   - `Esc` 优先中止执行或关闭临时面板
   - `Tab / Enter` 在命令面板中先填入命令，不直接执行
@@ -198,7 +199,7 @@ Linux：
 
 - `:session`
 - `:sessions`
-- `:resume [index|id]`（也支持标题关键词匹配）
+- `:resume [index|id]`
 - `:clear`
 
 ## 本地命令
@@ -210,11 +211,7 @@ Linux：
 - `:mode agent`
 - `:mode plan`
 - `:workspace`
-- `:status`（查看当前模式、模型、分支、远端同步状态、最近提交与工作区变更概览）
-- `:tools`（按类别展示工具目录，并标记风险级别）
-- `:doctor`
-- `:diff`
-- `:review`（展示审查摘要、重点变更与建议优先查看文件）
+- `:tools`
 - `:model [provider] [model]`
 - `:config`
 - `:config init`
@@ -225,12 +222,40 @@ Linux：
 - `:config clear api-key`
 - `:session`
 - `:sessions`
-- `:resume [index|id]`（也支持标题关键词匹配）
+- `:resume [index|id]`
 - `:storage`
 - `:storage set [path]`
 - `:storage reset`
 - `:clear`
 - `:exit`
+
+## 工具调用与审批
+
+模型可以调用四个工具：
+
+| 工具 | 能力 | 风险 |
+|---|---|---|
+| `workspace-read` | 读取工作区摘要 | safe |
+| `search-index` | 基于 ripgrep 的代码检索（无 rg 时回退到内置扫描） | safe |
+| `file-ops` | `read` / `list` / `write` / `update` / `patch` | 读取类 safe，写入类 careful |
+| `shell-runner` | 白名单命令执行 | 只读检索 safe，验证类命令 careful |
+
+`shell-runner` 只放行以下命令，其余一律拒绝：
+
+- 无需审批：`rg`、`git status/diff/log/show/branch/rev-parse`
+- 需要审批：`bun test`、`bun run build/typecheck/test/lint`、`bunx tsc`
+
+### 审批机制
+
+写入文件和执行验证命令不由模型自行决定。执行会在真正落盘/执行前暂停，终端弹出审批面板，展示工具名、风险级别、操作摘要和目标路径，等待按键：
+
+- `y` — 批准这一次
+- `n` — 拒绝；拒绝原因会作为工具结果回给模型，模型据此调整方案而不是重试
+- `a` — 本次会话内始终允许该工具
+
+审批面板挂起时按 `Esc` 会中止当轮执行并拒绝所有待决审批，不会卡住。
+
+这么设计的原因是：工具描述里的 `allowWrite: true` 只是模型的自我声明，模型多打几个字就能绕过，它不是权限边界。真正的边界必须落在用户按键上。
 
 ## Prompt Pack
 
@@ -301,23 +326,23 @@ Ink UI、交互控制器、终端布局、输入处理和视图组件。
 
 如果按里程碑粗略划分：
 
-- `M1` 会话持久化与启动恢复：已完成
-- `M2` 本地命令、配置管理、工具审批与基础工具链：已基本完成
-- `M3` 多轮 Agent 编排、更多生产级工具能力与完整协作闭环：仍在推进
+- `M1` 会话持久化与启动恢复：基本完成
+- `M2` 工具调用与 Agent 能力：闭环已跑通，四个工具可执行，agent 循环上限 4 轮
+- `M3` 审批 / 权限 / UI 打磨：风险分级与交互式审批已落地，权限策略与 UI 打磨继续推进
 
 ## 下一阶段重点
 
 接下来更值得继续推进的方向：
 
-- 继续扩展生产级工具能力，补齐与 `cc/` 对照下仍缺失的高级能力
-- 推进多轮 Agent 编排、任务拆分和更完整的协作执行链路
-- 继续清理国际化文本与文档一致性问题
-- 补足更完整的存储、配置异常与故障排查体验
-- 为后续插件、记忆和权限策略预留稳定扩展点
+- 继续优化会话区、sessions 列表和命令视窗的展示逻辑
+- 扩展权限策略：按路径或命令粒度的持久化允许规则
+- 提高 agent 多轮编排的可观测性（工具耗时、轮次展示）
+- 清理国际化文本编码问题
+- 为后续插件与记忆能力预留扩展点
 
 ## 项目信息
 
 - Project: `Adnify-Cli`
-- Maintainer: `Adnify Team`
+- Author: `adnaan`
 - Package Manager: `bun`
 - Terminal UI: `Ink`

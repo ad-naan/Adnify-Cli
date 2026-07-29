@@ -53,7 +53,7 @@ describe('ResolveStartupSessionUseCase', () => {
       id: 'session-older',
       title: 'older',
       mode: 'chat',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
     older.addUserMessage('msg-1', new Date('2026-01-01T00:05:00.000Z'), 'older')
@@ -62,7 +62,7 @@ describe('ResolveStartupSessionUseCase', () => {
       id: 'session-latest',
       title: 'latest',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:10:00.000Z'),
     })
     latest.addUserMessage('msg-2', new Date('2026-01-01T00:20:00.000Z'), 'latest')
@@ -80,7 +80,7 @@ describe('ResolveStartupSessionUseCase', () => {
     const useCase = new ResolveStartupSessionUseCase(repo, createSession, createMockLogger())
 
     const result = await useCase.execute({
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       mode: 'plan',
     })
 
@@ -100,7 +100,7 @@ describe('ResolveStartupSessionUseCase', () => {
     const useCase = new ResolveStartupSessionUseCase(repo, createSession, createMockLogger())
 
     const result = await useCase.execute({
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       mode: 'agent',
     })
 
