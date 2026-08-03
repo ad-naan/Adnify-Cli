@@ -11,6 +11,7 @@ import type { CliConfigPort } from '../../application/ports/CliConfigPort'
 import type { LoggerPort } from '../../application/ports/LoggerPort'
 import type { ModelGatewayPort, ModelMessage } from '../../application/ports/ModelGatewayPort'
 import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
+import type { SkillService } from '../skills/SkillService'
 import {
   createCliCommandOutputContent,
   createCliNoticeContent,
@@ -30,6 +31,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     private readonly toolExecutor: ToolExecutorPort,
     private readonly logger: LoggerPort,
     private readonly i18n: AppI18n,
+    private readonly skillService?: SkillService,
   ) {}
 
   updateGateway(gateway: ModelGatewayPort, config: ModelConfig): void {
@@ -185,13 +187,18 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
 
 
-  private buildMessages(command: AssistantResponderCommand): ModelMessage[] {
+  private async buildMessages(command: AssistantResponderCommand): Promise<ModelMessage[]> {
+    const skillListing = this.skillService
+      ? await this.skillService.buildListingBlock(command.session.mode)
+      : ''
+
     const systemPrompt = this.buildSystemPrompt(
       command.session,
       command.workspace,
       command.toolCatalog,
       this.cliConfig.getAssistantPromptSet(),
       command.memoryBlock,
+      skillListing,
     )
 
     const messages: ModelMessage[] = [{ role: 'system', content: systemPrompt }]
