@@ -28,6 +28,8 @@ import { LocalToolExecutor } from '../tooling/LocalToolExecutor'
 import { PendingToolApprovalAdapter } from '../tooling/PendingToolApprovalAdapter'
 import { LocalWorkspaceContextService } from '../workspace/LocalWorkspaceContextService'
 import { MemoryStore } from '../storage/MemoryStore'
+import { FsSkillRepository } from '../skills/FsSkillRepository'
+import { SkillService } from '../skills/SkillService'
 import { resolveUiPreferences } from './resolveUiPreferences'
 
 export type { AdnifyCliRuntime }
@@ -47,6 +49,12 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const toolApproval = new PendingToolApprovalAdapter()
   const toolExecutor = new LocalToolExecutor(toolApproval)
 
+  const skillRepository = new FsSkillRepository({
+    workspaceRoot: process.cwd(),
+    dataRoot: storage.dataRoot,
+  })
+  const skillService = new SkillService(skillRepository)
+
   const promptBundle = await loadPromptBundle()
   config.setPromptBundle(promptBundle)
 
@@ -60,7 +68,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     save: writeModelConfig,
   }
 
-  const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n)
+  const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n, skillService)
   let currentResponder = initialStack.responder
   let currentGateway = initialStack.gateway
 
@@ -100,7 +108,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
       return newConfig
     }
 
-    const newStack = createResponderStack(newConfig, config, toolExecutor, logger, i18n)
+    const newStack = createResponderStack(newConfig, config, toolExecutor, logger, i18n, skillService)
     currentResponder = newStack.responder
     currentGateway = newStack.gateway
     submitPrompt.updateResponder(currentResponder)
@@ -152,6 +160,7 @@ function createResponderStack(
   toolExecutor: ToolExecutorPort,
   logger: LoggerPort,
   i18n: ReturnType<typeof createAppI18n>,
+  skillService?: SkillService,
 ) {
   if (!modelConfig.apiKey) {
     logger.info('No API key configured, using unconfigured responder')
@@ -172,6 +181,7 @@ function createResponderStack(
     toolExecutor,
     logger,
     i18n,
+    skillService,
   )
   return { responder, gateway }
 }

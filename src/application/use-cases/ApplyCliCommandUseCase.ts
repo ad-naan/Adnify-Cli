@@ -40,6 +40,7 @@ export interface ApplyCliCommandCommand {
   modelSwitcher?: ModelSwitcher
   gitRunner?: GitRunner
   memoryStore?: MemoryStoreLike
+  skillStore?: SkillStoreLike
 }
 
 export interface MemoryStoreLike {
@@ -48,6 +49,11 @@ export interface MemoryStoreLike {
   remove(id: string): Promise<boolean>
   clear(): Promise<void>
   toPromptBlock(): Promise<string>
+}
+
+export interface SkillStoreLike {
+  listSkills(): Promise<Array<{ name: string; description: string }>>
+  getSkillBody(name: string): Promise<string | undefined>
 }
 
 export interface ApplyCliCommandResult {
@@ -908,6 +914,53 @@ export class ApplyCliCommandUseCase {
 
         this.logger.info('User requested CLI exit', { sessionId: command.sessionId })
         return persist(this.i18n.t('cli.exit.status'), { shouldExit: true })
+      }
+
+      case 'skill': {
+        addCommandInput()
+        const subArg = args[0]
+        const skillStore = command.skillStore
+
+        if (!skillStore) {
+          addCommandOutput('Skills are not available in this session.', {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist('Skills not available.')
+        }
+
+        if (subArg === 'list' || !subArg) {
+          const skills = await skillStore.listSkills()
+          if (skills.length === 0) {
+            addCommandOutput(
+              'No skills found. Create a skill by adding a SKILL.md file to .adnify/skills/<name>/ or your global data directory.',
+              { title: this.i18n.t('transcript.command'), tone: 'info' },
+            )
+            return persist('No skills available.')
+          }
+          const text = [
+            `Available skills (${skills.length}):`,
+            ...skills.map((s) => `- ${s.name}: ${s.description}`),
+          ].join('\n')
+          addCommandOutput(text, { title: this.i18n.t('transcript.command'), tone: 'info' })
+          return persist(`Listed ${skills.length} skill(s).`)
+        }
+
+        // :skill <name> — show full skill body
+        const skillBody = await skillStore.getSkillBody(subArg)
+        if (!skillBody) {
+          addCommandOutput(`Skill "${subArg}" not found. Use :skill list to see available skills.`, {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist(`Skill "${subArg}" not found.`)
+        }
+
+        addCommandOutput(skillBody, {
+          title: this.i18n.t('transcript.command'),
+          tone: 'info',
+        })
+        return persist(`Loaded skill: ${subArg}`)
       }
 
       default: {

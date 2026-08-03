@@ -60,7 +60,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
   }
 
   async *streamReply(command: AssistantResponderCommand): AsyncIterable<AssistantStreamChunk> {
-    const messages = this.buildMessages(command)
+    const messages = await this.buildMessages(command)
 
     this.logger.debug('Sending request to model gateway', {
       model: this.config.model,
@@ -224,6 +224,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     toolCatalog: AssistantResponderCommand['toolCatalog'],
     promptSet: AssistantPromptSet,
     memoryBlock?: string,
+    skillListing?: string,
   ): string {
     const modePrompt = promptSet.modes[session.mode]
     const toolBlock =
@@ -254,6 +255,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
     if (memoryBlock) {
       promptParts.push(memoryBlock, '')
+    }
+
+    if (skillListing) {
+      promptParts.push(skillListing, '')
     }
 
     promptParts.push(
