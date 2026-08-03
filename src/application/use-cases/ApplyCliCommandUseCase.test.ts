@@ -752,7 +752,7 @@ describe('ApplyCliCommandUseCase', () => {
       id: 'sess-doctor',
       title: 'Doctor',
       mode: 'agent',
-      workspacePath: 'E:/26Project/Adnify-Cli',
+      workspacePath: '/workspace/adnify-cli',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
     await repo.save(session)
@@ -776,7 +776,7 @@ describe('ApplyCliCommandUseCase', () => {
     const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
     expect(output?.kind).toBe('command-output')
     expect(output?.content).toContain('Runtime diagnostics:')
-    expect(output?.content).toContain('E:/26Project/Adnify-Cli')
+    expect(output?.content).toContain('/workspace/adnify-cli')
     expect(output?.content).toContain('gpt-5.4')
     expect(output?.content).toContain('Runtime looks ready.')
     expect(result.statusLine).toContain('Displayed runtime diagnostics')

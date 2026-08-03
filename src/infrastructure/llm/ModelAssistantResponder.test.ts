@@ -9,14 +9,18 @@ import type {
   ModelRequest,
   ModelStreamChunk,
 } from '../../application/ports/ModelGatewayPort'
-import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
+import type {
+  ToolExecutionRequest,
+  ToolExecutorPort,
+  ToolExecutionResult,
+} from '../../application/ports/ToolExecutorPort'
 import { AssistantProfile } from '../../domain/assistant/entities/AssistantProfile'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import { ToolDescriptor } from '../../domain/tooling/entities/ToolDescriptor'
 import { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import { ModelAssistantResponder } from './ModelAssistantResponder'
-import { parseCliTranscriptMarkup } from '../../application/support/CliTranscriptMarkup'
+
 
 
 function createMockLogger(): LoggerPort {
@@ -149,7 +153,7 @@ describe('ModelAssistantResponder', () => {
     expect(request.messages[0]?.content).toContain('当前模式：agent')
     expect(request.messages[0]?.content).toContain('Shell Runner [terminal] (dangerous)')
     expect(request.messages[0]?.content).toContain('adnify_tool_call')
-    expect(request.messages[0]?.content).toContain('may be paused for approval')
+    expect(request.messages[0]?.content).toContain('Risky actions pause for user approval')
     expect(request.messages[request.messages.length - 1]?.content).toBe('implement feature')
   })
 
@@ -240,14 +244,31 @@ describe('ModelAssistantResponder', () => {
     )
   })
 
-  test('should emit a pending approval event for dangerous tools', async () => {
-    let executed = false
+  test('should pass dangerous tool calls through the executor for approval handling', async () => {
+    const executedCalls: ToolExecutionRequest[] = []
 
+    let streamInvocation = 0
     const gateway: ModelGatewayPort = {
       async *streamChat(): AsyncIterable<ModelStreamChunk> {
-        yield {
-          delta: '<adnify_tool_call name="shell-runner">{"argv":["git","status"]}</adnify_tool_call>',
-          finishReason: 'stop',
+        streamInvocation += 1
+        if (streamInvocation === 1) {
+          yield {
+            delta: '<adnify_tool_call name="shell-runner">{"argv":["git","status"]}</adnify_tool_call>',
+            finishReason: 'stop',
+          }
+          return
+        }
+        yield { delta: 'Branch info retrieved.', finishReason: 'stop' }
+      },
+    }
+
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+        executedCalls.push(request)
+        return {
+          toolId: request.toolId,
+          ok: true,
+          content: '## main\norigin/main',
         }
       },
     }
@@ -271,12 +292,7 @@ describe('ModelAssistantResponder', () => {
           plan: 'plan instructions',
         },
       }),
-      {
-        execute: async () => {
-          executed = true
-          return { toolId: 'shell-runner', ok: true, content: 'should not run' }
-        },
-      },
+      toolExecutor,
       createMockLogger(),
       createAppI18n('en'),
     )
@@ -290,7 +306,7 @@ describe('ModelAssistantResponder', () => {
     })
 
     const transcripts: string[] = []
-    const approvals: string[] = []
+    const chunks: string[] = []
     for await (const chunk of responder.streamReply({
       prompt: 'inspect the repository state',
       session,
@@ -313,26 +329,45 @@ describe('ModelAssistantResponder', () => {
       if (chunk.transcript) {
         transcripts.push(chunk.transcript)
       }
-      if (chunk.approval) {
-        approvals.push(chunk.approval.toolId)
-      }
+      chunks.push(chunk.delta)
     }
 
-    expect(executed).toBe(false)
+    // The executor was invoked with the shell-runner tool call
+    expect(executedCalls).toHaveLength(1)
+    expect(executedCalls[0]?.toolId).toBe('shell-runner')
+
+    // Two transcript chunks: tool-start notice + tool-result output
     expect(transcripts).toHaveLength(2)
-    expect(transcripts[1]).toContain('requires explicit approval')
-    expect(approvals).toEqual(['shell-runner'])
+    expect(transcripts[0]).toContain('shell-runner')
+    expect(transcripts[1]).toContain('## main')
   })
 
-  test('should emit a pending approval event for file writes', async () => {
-    let executed = false
+  test('should pass file write tool calls through the executor for approval handling', async () => {
+    const executedCalls: ToolExecutionRequest[] = []
 
+    let streamInvocation = 0
     const gateway: ModelGatewayPort = {
       async *streamChat(): AsyncIterable<ModelStreamChunk> {
-        yield {
-          delta:
-            '<adnify_tool_call name="file-ops">{"action":"write","path":"src/example.ts","content":"export const a = 1","allowWrite":true}</adnify_tool_call>',
-          finishReason: 'stop',
+        streamInvocation += 1
+        if (streamInvocation === 1) {
+          yield {
+            delta:
+              '<adnify_tool_call name="file-ops">{"action":"write","path":"src/example.ts","content":"export const a = 1","allowWrite":true}</adnify_tool_call>',
+            finishReason: 'stop',
+          }
+          return
+        }
+        yield { delta: 'File created successfully.', finishReason: 'stop' }
+      },
+    }
+
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+        executedCalls.push(request)
+        return {
+          toolId: request.toolId,
+          ok: true,
+          content: 'File written: src/example.ts',
         }
       },
     }
@@ -356,12 +391,7 @@ describe('ModelAssistantResponder', () => {
           plan: 'plan instructions',
         },
       }),
-      {
-        execute: async () => {
-          executed = true
-          return { toolId: 'file-ops', ok: true, content: 'should not run' }
-        },
-      },
+      toolExecutor,
       createMockLogger(),
       createAppI18n('en'),
     )
@@ -375,7 +405,6 @@ describe('ModelAssistantResponder', () => {
     })
 
     const transcripts: string[] = []
-    const approvals: string[] = []
     for await (const chunk of responder.streamReply({
       prompt: 'create a file',
       session,
@@ -398,22 +427,22 @@ describe('ModelAssistantResponder', () => {
       if (chunk.transcript) {
         transcripts.push(chunk.transcript)
       }
-      if (chunk.approval) {
-        approvals.push(chunk.approval.toolId)
-      }
     }
 
-    expect(executed).toBe(false)
+    // The executor was invoked for the file-ops write
+    expect(executedCalls).toHaveLength(1)
+    expect(executedCalls[0]?.toolId).toBe('file-ops')
+    expect(executedCalls[0]?.input).toContain('write')
+    expect(executedCalls[0]?.input).toContain('src/example.ts')
+
+    // Tool executed and result shown in transcript
     expect(transcripts).toHaveLength(2)
-    const parsedTranscript = parseCliTranscriptMarkup(transcripts[1] ?? '')
-    expect(parsedTranscript?.kind).toBe('command-output')
-    expect(parsedTranscript?.content).toContain('file-ops action "write"')
-    expect(approvals).toEqual(['file-ops'])
+    expect(transcripts[1]).toContain('File written')
   })
 
-  test('should resume execution after approval is granted', async () => {
-    let executed = false
+  test('should complete the full agent loop when tool execution succeeds', async () => {
     let invocation = 0
+    let executed = false
 
     const gateway: ModelGatewayPort = {
       async *streamChat(): AsyncIterable<ModelStreamChunk> {
@@ -428,6 +457,13 @@ describe('ModelAssistantResponder', () => {
         }
 
         yield { delta: 'Repository state reviewed.', finishReason: 'stop' }
+      },
+    }
+
+    const toolExecutor: ToolExecutorPort = {
+      async execute(): Promise<ToolExecutionResult> {
+        executed = true
+        return { toolId: 'shell-runner', ok: true, content: 'clean tree' }
       },
     }
 
@@ -450,12 +486,7 @@ describe('ModelAssistantResponder', () => {
           plan: 'plan instructions',
         },
       }),
-      {
-        execute: async () => {
-          executed = true
-          return { toolId: 'shell-runner', ok: true, content: 'clean tree' }
-        },
-      },
+      toolExecutor,
       createMockLogger(),
       createAppI18n('en'),
     )
@@ -468,7 +499,9 @@ describe('ModelAssistantResponder', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     })
 
-    for await (const _chunk of responder.streamReply({
+    const chunks: string[] = []
+    const transcripts: string[] = []
+    for await (const chunk of responder.streamReply({
       prompt: 'inspect the repository state',
       session,
       workspace: new WorkspaceContext({
@@ -487,23 +520,18 @@ describe('ModelAssistantResponder', () => {
         }),
       ],
     })) {
-      // wait until paused for approval
-    }
-
-    const chunks: string[] = []
-    const transcripts: string[] = []
-    for await (const chunk of responder.streamApprovalDecision({
-      sessionId: session.id,
-      approved: true,
-    })) {
       if (chunk.transcript) {
         transcripts.push(chunk.transcript)
       }
       chunks.push(chunk.delta)
     }
 
+    // Tool was executed
     expect(executed).toBe(true)
-    expect(transcripts[0]).toContain('after approval')
+    // Final answer includes the model's second response
     expect(chunks.join('')).toBe('Repository state reviewed.')
+    // Two transcript entries (tool start + tool result)
+    expect(transcripts).toHaveLength(2)
+    expect(transcripts[1]).toContain('clean tree')
   })
 })

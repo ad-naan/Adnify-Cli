@@ -47,7 +47,7 @@ describe('LocalToolExecutor', () => {
     })
 
     expect(result.ok).toBe(false)
-    expect(result.content).toContain('Command is not allowed in this build')
+    expect(result.content).toContain('Command is not allowed')
   })
 
   test('should validate shell-runner argv payload', async () => {

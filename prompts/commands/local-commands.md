@@ -26,5 +26,11 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :storage reset
 - :sessions
 - :resume [index|id]
+- :memory [content]
+- :memory list
+- :memory clear
+- :checkpoint [message]
+- :undo
+- :context
 - :clear
 - :exit

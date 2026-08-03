@@ -28,6 +28,7 @@ export interface AssistantResponderCommand {
   workspace: WorkspaceContext
   toolCatalog: ToolDescriptor[]
   abortSignal?: AbortSignal
+  memoryBlock?: string
 }
 
 export interface AssistantApprovalCommand {

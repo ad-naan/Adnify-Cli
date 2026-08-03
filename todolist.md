@@ -13,7 +13,7 @@
 |------|------|----------|
 | M1 | 会话可持久化到本地，退出重开后可恢复工作区最近会话 | 已完成 |
 | M2 | 模型可调用工具，工具过程与结果可回到会话流中 | 已完成 |
-| M3 | 多轮工具协作、权限控制、稳定 UI 与完整协作链路 | 开发中，风险分级与交互式审批已落地 |
+| M3 | 多轮工具协作、权限控制、稳定 UI 与完整协作链路 | 核心能力已落地，持续增强中 |
 
 ---
 
@@ -52,12 +52,21 @@
 - 如需全量替换，必须显式声明 `replaceAll: true`
 - 审批按键：`y` 批准一次 / `n` 拒绝（原因回给模型）/ `a` 本会话始终允许该工具；`Esc` 中止并拒绝全部待决
 
+- [x] 扩展权限策略：按路径或命令粒度的持久化允许规则
+- [x] `shell-runner` 白名单全面扩展（npm/pnpm/yarn/npx/grep/find/cat/git mutation）
+- [x] 新增 `glob-search`、`web-search`、`web-fetch` 三个工具
+- [x] `maxAgentTurns` 提升到 20 轮
+- [x] 新增跨会话记忆系统（`:memory`）
+- [x] 新增 git 检查点系统（`:checkpoint` / `:undo`）
+- [x] 新增上下文窗口诊断（`:context`）
+- [x] 系统提示词全面增强
+
 ### 待继续
 
-- [ ] 扩展权限策略：按路径或命令粒度的持久化允许规则
 - [ ] 考虑把 `file-ops` 进一步扩展为更结构化的 patch 方案
 - [ ] 继续提升模型选择工具与组合工具的稳定性
-- [ ] 评估是否迁移到更原生的模型工具调用方案
+- [ ] 评估是否迁移到更原生的模型工具调用方案（native tool calling）
+- [ ] 补更完整的产品化 README 展示内容与截图
 
 ---
 
@@ -134,6 +143,25 @@
 ---
 
 ## 最近更新
+
+### 2026-08-03
+
+- 新增 3 个工具 handler：`glob-search`、`web-fetch`、`web-search`（无需外部 API key）
+- `maxAgentTurns` 从 4 提升到 20，模型可执行更长链路的自主任务
+- `TEXT_EXTENSIONS` 从 16 扩展到 70+ 种（支持 .py .go .rs .vue .svelte .sql .graphql .svg 等）
+- `MAX_FILE_READ_CHARS` 从 12K 提升到 50K，`MAX_FILE_WRITE_CHARS` 从 80K 提升到 200K
+- Shell 白名单大幅扩展：新增 grep/find/cat/head/tail/wc、npm/pnpm/yarn、npx、git add/commit/stash/checkout/reset/restore
+- 系统提示词全面更新：新增 7 个工具的调用格式说明、扩展后的 shell 白名单、Agent Discipline 指南
+- 新增 `:memory`/`:memory list`/`:memory clear` — 跨会话项目记忆系统
+  - 记忆存储在工作区独立的 JSON 文件中（`<dataRoot>/memories/<workspace>.json`）
+  - 记忆内容注入系统提示词，模型自动利用历史上下文
+- 新增 `:checkpoint [message]` — 一键 git 检查点（git add -A + git commit）
+- 新增 `:undo` — 撤销最近的检查点提交（git reset --soft HEAD~1）
+- 新增 `:context` — 上下文窗口诊断（消息数、字符数、近似 token 数、健康度检查）
+- 新增 `MemoryStore` 基础设施类，支持 workspace-scoped 记忆持久化
+- 修复 5 个失败测试：ApplyCliCommandUseCase diagnostic 硬编码路径、ModelAssistantResponder 测试适配新审批架构
+- 修复 `classifyShellCommand.ts` 重复类型声明
+- 修复 `globSearchHandler.ts` 类型安全比较
 
 ### 2026-07-29
 

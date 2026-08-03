@@ -17,6 +17,9 @@ import { handleSearchIndex } from './handlers/searchIndexHandler'
 import { parseShellRunnerRequest, runShellCommand } from './handlers/shellRunnerHandler'
 import { toolFailure } from './handlers/ToolHandler'
 import { handleWorkspaceRead } from './handlers/workspaceReadHandler'
+import { handleGlobSearch } from './handlers/globSearchHandler'
+import { handleWebFetch } from './handlers/webFetchHandler'
+import { handleWebSearch } from './handlers/webSearchHandler'
 
 /**
  * 工具调度入口。
@@ -33,6 +36,12 @@ export class LocalToolExecutor implements ToolExecutorPort {
         return handleWorkspaceRead(request)
       case 'search-index':
         return handleSearchIndex(request)
+      case 'glob-search':
+        return handleGlobSearch(request)
+      case 'web-search':
+        return handleWebSearch(request)
+      case 'web-fetch':
+        return handleWebFetch(request)
       case 'file-ops':
         return this.executeFileOps(request)
       case 'shell-runner':

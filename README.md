@@ -45,8 +45,11 @@ Adnify-Cli 想做的不是“一个能聊天的 CLI”，而是“一个真正�
 - 支持运行时切换模型配置。
 - 支持中英双语国际化基础设施。
 - 支持 Prompt Pack 驱动的系统提示词、模式提示词、工具定义和命令定义。
-- 支持工具调用闭环：模型可调用 `workspace-read / search-index / file-ops / shell-runner` 四个工具，工具过程与结果作为过程消息回流到会话区。
+- 支持工具调用闭环：模型可调用 `workspace-read / search-index / glob-search / file-ops / shell-runner / web-search / web-fetch` 七个工具，工具过程与结果作为过程消息回流到会话区。
 - 支持风险分级与交互式审批：写文件与执行验证命令前会暂停并等待用户确认。
+- 支持跨会话项目记忆：`:memory <content>` 保存项目知识，后续会话自动注入。
+- 支持 git 检查点：`:checkpoint` 一键提交当前工作状态，`:undo` 撤销最近检查点。
+- 支持上下文窗口诊断：`:context` 查看消息数、token 估算和健康度。
 - 输入交互已做过一轮接近 `cc` 风格的优化：
   - `Esc` 优先中止执行或关闭临时面板
   - `Tab / Enter` 在命令面板中先填入命令，不直接执行
@@ -200,32 +203,12 @@ Linux：
 - `:session`
 - `:sessions`
 - `:resume [index|id]`
-- `:clear`
-
-## 本地命令
-
-当前内置命令包括：
-
-- `:help`
-- `:mode chat`
-- `:mode agent`
-- `:mode plan`
-- `:workspace`
-- `:tools`
-- `:model [provider] [model]`
-- `:config`
-- `:config init`
-- `:config set provider [value]`
-- `:config set model [value]`
-- `:config set api-key [value]`
-- `:config set base-url [value]`
-- `:config clear api-key`
-- `:session`
-- `:sessions`
-- `:resume [index|id]`
-- `:storage`
-- `:storage set [path]`
-- `:storage reset`
+- `:memory [content]`
+- `:memory list`
+- `:memory clear`
+- `:checkpoint [message]`
+- `:undo`
+- `:context`
 - `:clear`
 - `:exit`
 
@@ -237,13 +220,16 @@ Linux：
 |---|---|---|
 | `workspace-read` | 读取工作区摘要 | safe |
 | `search-index` | 基于 ripgrep 的代码检索（无 rg 时回退到内置扫描） | safe |
+| `glob-search` | 基于通配符的文件匹配 | safe |
 | `file-ops` | `read` / `list` / `write` / `update` / `patch` | 读取类 safe，写入类 careful |
 | `shell-runner` | 白名单命令执行 | 只读检索 safe，验证类命令 careful |
+| `web-search` | 基于 DuckDuckGo 的公开网络搜索（无需 API key） | careful |
+| `web-fetch` | 获取并提取 URL 页面的文本内容 | careful |
 
 `shell-runner` 只放行以下命令，其余一律拒绝：
 
-- 无需审批：`rg`、`git status/diff/log/show/branch/rev-parse`
-- 需要审批：`bun test`、`bun run build/typecheck/test/lint`、`bunx tsc`
+- 无需审批：`rg`、`grep`、`find`、`cat`、`head`、`tail`、`wc`、`sort`、`uniq`、`git status/diff/log/show/branch/rev-parse/remote/tag/ls-files/blame/shortlog/describe`
+- 需要审批：`bun test`、`bun run build/typecheck/test/lint/check/dev/start`、`bunx tsc/eslint/prettier/vitest`、`npm/pnpm/yarn run <script>/install/ci`、`npx tsc/eslint/prettier/vitest/jest`、`tsc`、`git add/commit/stash/checkout/reset/restore`
 
 ### 审批机制
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BootstrapSnapshot } from '../../../application/dto/BootstrapSnapshot'
 import type { SessionListItem } from '../../../application/dto/SessionListItem'
 import type { AdnifyCliRuntime } from '../../../application/dto/AdnifyCliRuntime'
+import { MemoryStore } from '../../../infrastructure/storage/MemoryStore'
 import type { ConversationSession } from '../../../domain/session/aggregates/ConversationSession'
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import type { CommandSuggestionItem } from '../components/CommandSuggestionList'
@@ -51,6 +52,12 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':session': 'command.desc.session',
   ':sessions': 'command.desc.sessions',
   ':resume [index|id]': 'command.desc.resume',
+  ':memory [content]': 'command.desc.memory',
+  ':memory list': 'command.desc.memory',
+  ':memory clear': 'command.desc.memory',
+  ':checkpoint [message]': 'command.desc.checkpoint',
+  ':undo': 'command.desc.undo',
+  ':context': 'command.desc.context',
   ':storage': 'command.desc.storage',
   ':storage set [path]': 'command.desc.storage',
   ':storage reset': 'command.desc.storage',
@@ -98,6 +105,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const draftInputRef = useRef('')
   const streamingBufferRef = useRef('')
   const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const memoryStoreRef = useRef<MemoryStore | null>(null)
   const configInit = useConfigInit(i18n)
   const toolApproval = useToolApproval(params.runtime.toolApproval, i18n)
 
@@ -192,6 +200,11 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
 
         setBootstrap(bootSnapshot)
         setSession(startupSession.session)
+
+        // Create workspace-scoped memory store
+        const bootStorage = bootSnapshot.storage
+        memoryStoreRef.current = new MemoryStore(bootStorage, bootSnapshot.workspace.rootPath)
+
         await refreshRecentSessions(bootSnapshot.workspace.rootPath)
 
         if (!bootSnapshot.modelConfig.apiKey) {
@@ -401,6 +414,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           sessionId: session.id,
           commandLine: nextInput,
           bootstrap,
+          memoryStore: memoryStoreRef.current ?? undefined,
           configUpdater: {
             applyModelConfig: (nextConfig) => {
               const activeConfig = params.runtime.applyModelConfig(nextConfig)
@@ -433,8 +447,12 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
 
       resetStreamingState()
 
+      const memoryBlock = memoryStoreRef.current
+        ? await memoryStoreRef.current.toPromptBlock()
+        : undefined
+
       const result = await params.runtime.useCases.submitPrompt.executeStreaming(
-        { sessionId: session.id, prompt: nextInput, abortSignal: abortController.signal },
+        { sessionId: session.id, prompt: nextInput, abortSignal: abortController.signal, memoryBlock: memoryBlock || undefined },
         {
           onChunk: (delta) => {
             queueStreamingChunk(delta)

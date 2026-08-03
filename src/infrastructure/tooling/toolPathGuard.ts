@@ -1,28 +1,79 @@
 import { extname, resolve } from 'node:path'
 
-export const MAX_FILE_READ_CHARS = 12_000
-export const MAX_FILE_WRITE_CHARS = 80_000
-export const MAX_DIRECTORY_ENTRIES = 40
-export const MAX_SCAN_FILES = 200
-export const DEFAULT_SEARCH_LIMIT = 8
+export const MAX_FILE_READ_CHARS = 50_000
+export const MAX_FILE_WRITE_CHARS = 200_000
+export const MAX_DIRECTORY_ENTRIES = 80
+export const MAX_SCAN_FILES = 500
+export const DEFAULT_SEARCH_LIMIT = 20
 
 export const TEXT_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
   '.js',
   '.jsx',
+  '.mjs',
+  '.cjs',
   '.json',
+  '.json5',
+  '.jsonc',
   '.md',
+  '.mdx',
   '.txt',
   '.yml',
   '.yaml',
   '.toml',
+  '.ini',
+  '.cfg',
+  '.conf',
   '.css',
   '.scss',
+  '.sass',
+  '.less',
   '.html',
+  '.htm',
+  '.xml',
+  '.svg',
   '.sh',
+  '.bash',
+  '.zsh',
+  '.fish',
   '.ps1',
+  '.bat',
+  '.cmd',
   '.env',
+  '.py',
+  '.rb',
+  '.go',
+  '.rs',
+  '.java',
+  '.kt',
+  '.swift',
+  '.c',
+  '.cpp',
+  '.h',
+  '.hpp',
+  '.cs',
+  '.php',
+  '.vue',
+  '.svelte',
+  '.graphql',
+  '.gql',
+  '.sql',
+  '.dockerfile',
+  '.gitignore',
+  '.gitattributes',
+  '.editorconfig',
+  '.prettierrc',
+  '.eslintrc',
+  '.babelrc',
+  '.ruby-version',
+  '.python-version',
+  '.node-version',
+  '.nvmrc',
+  '.lock',
+  '.diff',
+  '.patch',
+  '.log',
 ])
 
 const ALLOWED_TEXT_FILENAMES = new Set([

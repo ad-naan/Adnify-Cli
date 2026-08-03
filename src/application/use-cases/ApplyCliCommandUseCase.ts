@@ -39,6 +39,15 @@ export interface ApplyCliCommandCommand {
   configUpdater?: ConfigUpdater
   modelSwitcher?: ModelSwitcher
   gitRunner?: GitRunner
+  memoryStore?: MemoryStoreLike
+}
+
+export interface MemoryStoreLike {
+  list(): Promise<Array<{ id: string; content: string; createdAt: string }>>
+  add(content: string): Promise<{ id: string; content: string; createdAt: string }>
+  remove(id: string): Promise<boolean>
+  clear(): Promise<void>
+  toPromptBlock(): Promise<string>
 }
 
 export interface ApplyCliCommandResult {
@@ -723,6 +732,171 @@ export class ApplyCliCommandUseCase {
           tone: 'success',
         })
         return persist(this.i18n.t('cli.clear.status'))
+      }
+
+      case 'memory': {
+        addCommandInput()
+        const subArg = args[0]
+
+        if (command.memoryStore) {
+          if (subArg === 'clear') {
+            await command.memoryStore.clear()
+            addCommandOutput('All project memories cleared.', {
+              title: this.i18n.t('transcript.command'),
+              tone: 'success',
+            })
+            return persist('Cleared all memories.')
+          }
+
+          if (subArg === 'list' || !subArg) {
+            const entries = await command.memoryStore.list()
+            const text =
+              entries.length > 0
+                ? [
+                    `Project memories (${entries.length}):`,
+                    ...entries.map(
+                      (e: { id: string; content: string; createdAt: string }, i: number) =>
+                        `[${i + 1}] ${e.content}`,
+                    ),
+                  ].join('\n')
+                : 'No memories saved yet. Use :memory <content> to save a fact.'
+            addCommandOutput(text, { title: this.i18n.t('transcript.command'), tone: 'info' })
+            return persist(`Showing ${entries.length} memor${entries.length === 1 ? 'y' : 'ies'}.`)
+          }
+
+          // :memory <content> — save a new memory
+          const memoryContent = rawArgs.trim()
+          if (memoryContent) {
+            const entry = await command.memoryStore.add(memoryContent)
+            addCommandOutput(`Memory saved: ${entry.content}`, {
+              title: this.i18n.t('transcript.command'),
+              tone: 'success',
+            })
+            return persist('Memory saved for future sessions.')
+          }
+        }
+
+        addCommandOutput(
+          'Memory store not available. Usage: :memory <content> | :memory list | :memory clear',
+          { title: this.i18n.t('transcript.command'), tone: 'warning' },
+        )
+        return persist('Memory store not available.')
+      }
+
+      case 'checkpoint': {
+        addCommandInput()
+
+        if (!command.bootstrap.workspace.isGitRepository) {
+          addCommandOutput('Not a git repository — checkpoint requires git.', {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist('Checkpoint requires git.')
+        }
+
+        try {
+          const message = rawArgs.trim() || `adnify-checkpoint: ${new Date().toISOString()}`
+          const workspacePath = command.bootstrap.workspace.rootPath
+          await execFileAsync('git', ['add', '-A'], { cwd: workspacePath, windowsHide: true })
+          await execFileAsync('git', ['commit', '-m', message, '--no-verify'], {
+            cwd: workspacePath,
+            windowsHide: true,
+            maxBuffer: 1024 * 1024,
+          })
+          const { stdout: logOut } = await execFileAsync(
+            'git',
+            ['log', '--oneline', '-1'],
+            { cwd: workspacePath, windowsHide: true },
+          )
+          addCommandOutput(
+            ['Checkpoint created.', logOut.trim()].join('\n'),
+            { title: this.i18n.t('transcript.command'), tone: 'success' },
+          )
+          return persist('Checkpoint committed.')
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error)
+          const hint = msg.includes('nothing to commit')
+            ? 'Nothing to commit — working tree is clean.'
+            : `Checkpoint failed: ${msg}`
+          addCommandOutput(hint, {
+            title: this.i18n.t('transcript.command'),
+            tone: msg.includes('nothing to commit') ? 'info' : 'danger',
+          })
+          return persist(hint)
+        }
+      }
+
+      case 'undo': {
+        addCommandInput()
+
+        if (!command.bootstrap.workspace.isGitRepository) {
+          addCommandOutput('Not a git repository — undo requires git.', {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist('Undo requires git.')
+        }
+
+        try {
+          const workspacePath = command.bootstrap.workspace.rootPath
+          // Undo last commit, keeping changes in working tree
+          await execFileAsync('git', ['reset', '--soft', 'HEAD~1'], {
+            cwd: workspacePath,
+            windowsHide: true,
+          })
+          const { stdout: statusOut } = await execFileAsync(
+            'git',
+            ['status', '--short'],
+            { cwd: workspacePath, windowsHide: true },
+          )
+          addCommandOutput(
+            [
+              'Reverted last commit (changes kept in staging).',
+              statusOut.trim() || 'Working tree clean.',
+            ].join('\n'),
+            { title: this.i18n.t('transcript.command'), tone: 'success' },
+          )
+          return persist('Undid last checkpoint.')
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error)
+          addCommandOutput(`Undo failed: ${msg}`, {
+            title: this.i18n.t('transcript.command'),
+            tone: 'danger',
+          })
+          return persist(`Undo failed: ${msg}`)
+        }
+      }
+
+      case 'context': {
+        addCommandInput()
+        const messages = session.getMessages()
+        const userMessages = messages.filter((m) => m.role === 'user')
+        const assistantMessages = messages.filter((m) => m.role === 'assistant')
+        const systemMessages = messages.filter((m) => m.role === 'system')
+
+        const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0)
+        const approxTokens = Math.ceil(totalChars / 4)
+
+        const text = [
+          'Context window summary:',
+          formatKeyValueLine('messages', String(messages.length)),
+          formatKeyValueLine('user', String(userMessages.length)),
+          formatKeyValueLine('assistant', String(assistantMessages.length)),
+          formatKeyValueLine('system', String(systemMessages.length)),
+          formatKeyValueLine('totalChars', String(totalChars)),
+          formatKeyValueLine('approxTokens', String(approxTokens)),
+          formatKeyValueLine('maxTokens', String(command.bootstrap.modelConfig.maxTokens)),
+          '',
+          approxTokens > command.bootstrap.modelConfig.maxTokens * 0.7
+            ? 'Warning: context is approaching token limit. Consider :clear to reset.'
+            : 'Context looks healthy.',
+        ].join('\n')
+
+        addCommandOutput(text, {
+          title: this.i18n.t('transcript.command'),
+          tone: 'info',
+        })
+        return persist('Context summary displayed.')
       }
 
       case 'exit': {

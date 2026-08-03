@@ -16,6 +16,7 @@ export interface SubmitPromptCommand {
   sessionId: string
   prompt: string
   abortSignal?: AbortSignal
+  memoryBlock?: string
 }
 
 export interface SubmitApprovalDecisionCommand {
@@ -102,6 +103,7 @@ export class SubmitPromptUseCase {
     session.addUserMessage(this.idGenerator.next(), now, prompt)
 
     const workspace = await this.workspaceContextPort.inspect(session.workspacePath)
+    const memoryBlock = command.memoryBlock
     return this.consumeAssistantStream(
       session,
       prompt.length,
@@ -111,6 +113,7 @@ export class SubmitPromptUseCase {
         workspace,
         toolCatalog: this.config.getToolCatalog(),
         abortSignal: command.abortSignal,
+        memoryBlock,
       }),
       callbacks,
       command.abortSignal,

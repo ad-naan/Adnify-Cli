@@ -27,6 +27,7 @@ import { SystemClock } from '../system/SystemClock'
 import { LocalToolExecutor } from '../tooling/LocalToolExecutor'
 import { PendingToolApprovalAdapter } from '../tooling/PendingToolApprovalAdapter'
 import { LocalWorkspaceContextService } from '../workspace/LocalWorkspaceContextService'
+import { MemoryStore } from '../storage/MemoryStore'
 import { resolveUiPreferences } from './resolveUiPreferences'
 
 export type { AdnifyCliRuntime }
@@ -141,6 +142,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     switchModel,
     applyModelConfig: activateModelConfig,
     toolApproval,
+    memoryStore: null,
   }
 }
 
