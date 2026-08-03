@@ -7,8 +7,20 @@ declare module 'bun:test' {
     toContain: (expected: unknown) => void
     toHaveLength: (expected: number) => void
     toBeNull: () => void
+    toBeUndefined: () => void
+    toBeTruthy: () => void
+    toBeFalsy: () => void
+    toBeGreaterThan: (expected: number) => void
+    toBeLessThan: (expected: number) => void
     not: {
+      toBe: (expected: unknown) => void
+      toEqual: (expected: unknown) => void
+      toContain: (expected: unknown) => void
+      toHaveLength: (expected: number) => void
       toBeNull: () => void
+      toBeUndefined: () => void
+      toBeTruthy: () => void
+      toBeFalsy: () => void
     }
     rejects: {
       toThrow: (expected?: unknown) => Promise<void>
