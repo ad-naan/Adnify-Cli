@@ -748,7 +748,7 @@ export function resolveAppLocale(input?: string | null): AppLocale {
 }
 
 export function resolveAppLocaleFromEnv(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = getRuntimeEnvironment(),
 ): AppLocale {
   const candidates = [
     env.ADNIFY_LOCALE,
@@ -765,6 +765,14 @@ export function resolveAppLocaleFromEnv(
   }
 
   return 'en'
+}
+
+function getRuntimeEnvironment(): Record<string, string | undefined> {
+  const runtime = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> }
+  }
+
+  return runtime.process?.env ?? {}
 }
 
 function getRuntimeLocale(): string | undefined {
