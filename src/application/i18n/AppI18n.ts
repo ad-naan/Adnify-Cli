@@ -332,9 +332,6 @@ const messages = {
     'tool.category.workspace': '工作区',
     'tool.category.execution': '执行',
     'tool.category.search': '检索',
-    'tool.risk.safe': '安全',
-    'tool.risk.careful': '谨慎',
-    'tool.risk.dangerous': '高风险',
 
     'unconfigured.replyHelpTitle': '在完成模型配置前，当前构建不会发送真实模型请求。',
     'unconfigured.replyHelpConfig': '- 输入 :config 查看当前配置状态',
@@ -681,9 +678,6 @@ const messages = {
     'tool.category.workspace': 'Workspace',
     'tool.category.execution': 'Execution',
     'tool.category.search': 'Search',
-    'tool.risk.safe': 'safe',
-    'tool.risk.careful': 'careful',
-    'tool.risk.dangerous': 'dangerous',
 
     'unconfigured.replyHelpTitle':
       'This build will not send real model requests until model setup is complete.',

@@ -17,7 +17,7 @@ const READONLY_GIT_SUBCOMMANDS = new Set([
   'blame',
   'shortlog',
   'describe',
-
+])
 
 const CAREFUL_GIT_SUBCOMMANDS = new Set([
   'add',
