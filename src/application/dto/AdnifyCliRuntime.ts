@@ -1,9 +1,12 @@
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import type { AppI18n } from '../i18n/AppI18n'
 import type { ToolApprovalController } from '../ports/ToolApprovalPort'
-import type { MemoryStoreLike } from '../use-cases/ApplyCliCommandUseCase'
+import type {
+  ApplyCliCommandUseCase,
+  MemoryStoreLike,
+  SkillStoreLike,
+} from '../use-cases/ApplyCliCommandUseCase'
 import type { UiPreferences } from './UiPreferences'
-import type { ApplyCliCommandUseCase } from '../use-cases/ApplyCliCommandUseCase'
 import type { BootstrapCliUseCase } from '../use-cases/BootstrapCliUseCase'
 import type { CreateSessionUseCase } from '../use-cases/CreateSessionUseCase'
 import type { ListSessionsUseCase } from '../use-cases/ListSessionsUseCase'
@@ -27,4 +30,6 @@ export interface AdnifyCliRuntime {
   toolApproval: ToolApprovalController
   /** 跨会话项目记忆存储 */
   memoryStore?: MemoryStoreLike | null
+  /** Skill 存储 — 用于 :skill 命令 */
+  skillStore?: SkillStoreLike
 }

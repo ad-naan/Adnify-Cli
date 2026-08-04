@@ -906,4 +906,88 @@ describe('ApplyCliCommandUseCase', () => {
     expect(store.saved[0]?.model).toBe('gpt-5')
     expect(result.statusLine).toContain('Configuration updated')
   })
+
+  test('should list available skills', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-skill-list',
+      title: 'Skills',
+      mode: 'agent',
+      workspacePath: '/workspace/adnify-cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const skillStore = {
+      listSkills: async () => [
+        { name: 'code-review', description: 'Code review guidelines' },
+        { name: 'deployment', description: 'Deployment checklist' },
+      ],
+      getSkillBody: async () => undefined,
+    }
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':skill list',
+      bootstrap: createBootstrapSnapshot(),
+      skillStore,
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('Available skills (2):')
+    expect(output?.content).toContain('code-review: Code review guidelines')
+    expect(result.statusLine).toContain('2 skill')
+  })
+
+  test('should show a specific skill body', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-skill-show',
+      title: 'SkillShow',
+      mode: 'agent',
+      workspacePath: '/workspace/adnify-cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const skillStore = {
+      listSkills: async () => [{ name: 'code-review', description: 'Code review guidelines' }],
+      getSkillBody: async (name: string) =>
+        name === 'code-review' ? '## Skill: code-review\nReview PRs with care.' : undefined,
+    }
+
+    const result = await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':skill code-review',
+      bootstrap: createBootstrapSnapshot(),
+      skillStore,
+    })
+
+    const output = parseCliTranscriptMarkup(result.session.getMessages()[1]?.content ?? '')
+    expect(output?.kind).toBe('command-output')
+    expect(output?.content).toContain('## Skill: code-review')
+    expect(output?.content).toContain('Review PRs with care.')
+    expect(result.statusLine).toContain('code-review')
+  })
 })

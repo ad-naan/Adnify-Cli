@@ -149,6 +149,11 @@ const messages = {
     'command.desc.sessions': '查看最近会话列表',
     'command.desc.resume': '恢复指定会话',
     'command.desc.storage': '查看或设置数据存储目录',
+    'command.desc.memory': '保存或查看跨会话记忆',
+    'command.desc.checkpoint': '创建 git 检查点提交',
+    'command.desc.undo': '撤销最后一次检查点',
+    'command.desc.skill': '查看或加载技能指令',
+    'command.desc.context': '查看当前上下文使用情况',
     'command.desc.clear': '清空当前会话消息',
     'command.desc.exit': '退出 Adnify-Cli',
 
@@ -493,6 +498,11 @@ const messages = {
     'command.desc.sessions': 'Show recent sessions',
     'command.desc.resume': 'Resume a saved session',
     'command.desc.storage': 'Inspect or change the data directory',
+    'command.desc.memory': 'Save or list cross-session memories',
+    'command.desc.checkpoint': 'Create a git checkpoint commit',
+    'command.desc.undo': 'Undo the last checkpoint',
+    'command.desc.skill': 'List or load skill instructions',
+    'command.desc.context': 'Show current context usage',
     'command.desc.clear': 'Clear current conversation messages',
     'command.desc.exit': 'Exit Adnify-Cli',
 

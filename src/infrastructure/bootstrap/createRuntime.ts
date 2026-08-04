@@ -151,6 +151,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     applyModelConfig: activateModelConfig,
     toolApproval,
     memoryStore: null,
+    skillStore: skillService,
   }
 }
 

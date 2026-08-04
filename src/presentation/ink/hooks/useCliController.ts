@@ -57,6 +57,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':memory clear': 'command.desc.memory',
   ':checkpoint [message]': 'command.desc.checkpoint',
   ':undo': 'command.desc.undo',
+  ':skill [name|list]': 'command.desc.skill',
   ':context': 'command.desc.context',
   ':storage': 'command.desc.storage',
   ':storage set [path]': 'command.desc.storage',
@@ -415,6 +416,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           commandLine: nextInput,
           bootstrap,
           memoryStore: memoryStoreRef.current ?? undefined,
+          skillStore: params.runtime.skillStore ?? undefined,
           configUpdater: {
             applyModelConfig: (nextConfig) => {
               const activeConfig = params.runtime.applyModelConfig(nextConfig)

@@ -116,6 +116,21 @@ export class SkillService {
   }
 
   /**
+   * SkillStoreLike 兼容方法 — 返回 name + description 列表（用于 :skill list）。
+   */
+  async listSkills(): Promise<Array<{ name: string; description: string }>> {
+    const skills = await this.getAllSkills()
+    return skills.map((s) => ({ name: s.name, description: s.description }))
+  }
+
+  /**
+   * SkillStoreLike 兼容方法 — 返回完整 skill body（用于 :skill <name>）。
+   */
+  async getSkillBody(name: string): Promise<string | undefined> {
+    return this.loadSkillBody(name)
+  }
+
+  /**
    * 强制刷新缓存（文件变更后调用）。
    */
   invalidateCache(): void {
