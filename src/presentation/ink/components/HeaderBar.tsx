@@ -31,10 +31,10 @@ function ModeBadge(props: { mode: AssistantMode; busy?: boolean }) {
         : adnifyTheme.success
 
   return (
-    <Text inverse color={color}>
+    <Text backgroundColor={color} color={adnifyTheme.surface} bold>
       {' '}
       {props.mode.toUpperCase()}
-      {props.busy ? ' LIVE' : ''}
+      {props.busy ? ' ●' : ''}
       {' '}
     </Text>
   )
@@ -74,8 +74,9 @@ export const HeaderBar = memo(function HeaderBar(props: HeaderBarProps) {
             <ActivityPulse
               active={props.busy}
               animated={props.animateBrand}
-              color={adnifyTheme.brandStrong}
-              idleFrame=".. "
+              color={adnifyTheme.brandSoft}
+              idleFrame="·  "
+              variant="dots"
             />
             <MetaPill label={props.i18n.t('header.meta.workspace')} value={props.workspaceName} />
             {props.packageManager ? (

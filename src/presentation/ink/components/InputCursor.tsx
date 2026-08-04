@@ -7,10 +7,15 @@ export interface InputCursorProps {
   busy?: boolean
 }
 
+/**
+ * Blinking cursor indicator.
+ * Uses ANSI bold + inverse for a subtle highlight effect.
+ */
 export const InputCursor = memo(function InputCursor(props: InputCursorProps) {
+  const color = props.busy ? adnifyTheme.brandSoft : adnifyTheme.brand
   return (
-    <Text color={props.busy ? adnifyTheme.brand : adnifyTheme.brandStrong}>
-      {props.visible ? '_' : ' '}
+    <Text color={color} bold={props.busy}>
+      {props.visible ? '\u2588' : ' '}
     </Text>
   )
 })

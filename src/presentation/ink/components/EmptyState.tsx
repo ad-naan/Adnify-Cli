@@ -19,6 +19,7 @@ export interface EmptyStateProps {
   mode: AssistantMode
   modelLabel: string
   busy?: boolean
+  animateBrand?: boolean
   commands: string[]
   currentSessionId: string
   recentSessions: SessionListItem[]
@@ -34,10 +35,10 @@ function ModeBadge(props: { mode: AssistantMode; busy?: boolean }) {
         : adnifyTheme.success
 
   return (
-    <Text inverse color={color}>
+    <Text backgroundColor={color} color={adnifyTheme.surface} bold>
       {' '}
       {props.mode.toUpperCase()}
-      {props.busy ? ' LIVE' : ''}
+      {props.busy ? ' ●' : ''}
       {' '}
     </Text>
   )
@@ -55,7 +56,9 @@ function MetaRow(props: { label: string; value: string; color?: string }) {
 function QuickCommandItem(props: { command: string }) {
   return (
     <Box gap={1}>
-      <Text color={adnifyTheme.brandStrong}>{'>'}</Text>
+      <Text color={adnifyTheme.brandSoft} bold>
+        ❯
+      </Text>
       <Text color={adnifyTheme.textPrimary}>{props.command}</Text>
     </Box>
   )
@@ -79,7 +82,7 @@ export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
     >
       {/* Left Column: Big Mascot & Brand */}
       <Box flexDirection="column" flexGrow={1} alignItems="center" justifyContent="center">
-        <MascotGlyph active={props.busy} large />
+        <MascotGlyph active={props.busy} animated={props.animateBrand} large />
         <Box flexDirection="column" alignItems="center" marginTop={1}>
           <Box gap={1}>
             <Text color={adnifyTheme.brandSoft} bold>

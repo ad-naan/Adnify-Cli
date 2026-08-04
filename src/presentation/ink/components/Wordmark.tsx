@@ -16,7 +16,7 @@ export interface WordmarkProps {
 export const Wordmark = memo(function Wordmark(props: WordmarkProps) {
   return (
     <Box gap={1} alignItems="flex-start">
-      <MascotGlyph active={Boolean(props.busy && props.animateMascot)} />
+      <MascotGlyph active={Boolean(props.busy && props.animateMascot)} animated={props.animateMascot} />
       <Box flexDirection="column">
         <Box gap={1}>
           <Text color={adnifyTheme.brandSoft} bold>

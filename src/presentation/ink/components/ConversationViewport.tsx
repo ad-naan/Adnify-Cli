@@ -356,12 +356,13 @@ function renderViewportRow(row: ViewportRow, animateStreamingIndicator: boolean)
   if (row.kind === 'streaming-header') {
     return (
       <Box key={row.key} width="100%" gap={1}>
-        <Text color={adnifyTheme.brand}>adnify</Text>
+        <Text color={adnifyTheme.brand} bold>adnify</Text>
         <ActivityPulse
           active
           animated={animateStreamingIndicator}
-          color={adnifyTheme.brandStrong}
-          idleFrame=".  "
+          color={adnifyTheme.brandSoft}
+          idleFrame="·  "
+          variant="dots"
         />
         <Text color={adnifyTheme.textDim}>{row.label}</Text>
       </Box>

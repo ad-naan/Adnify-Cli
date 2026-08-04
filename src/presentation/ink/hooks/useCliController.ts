@@ -639,6 +639,9 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       return
     }
 
+    // Ink 7: key.meta is no longer set for plain Escape — only for actual Alt/Meta combos.
+    // We already handle Escape above, so no changes needed here.
+
     if (!key.ctrl && !key.meta) {
       if (historyIndex !== null) {
         setHistoryIndex(null)

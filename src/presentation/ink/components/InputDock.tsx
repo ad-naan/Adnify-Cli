@@ -92,8 +92,9 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
           <ActivityPulse
             active={props.busy}
             animated={Boolean(props.busy && props.animateBusyIndicator)}
-            color={props.busy ? adnifyTheme.brandStrong : adnifyTheme.textDim}
-            idleFrame=".. "
+            color={props.busy ? adnifyTheme.brandSoft : adnifyTheme.textDim}
+            idleFrame="·  "
+            variant="dots"
           />
           <Text color={adnifyTheme.textDim}>{props.i18n.t('input.labelInput')}</Text>
         </Box>
@@ -116,7 +117,9 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
 
       <Box marginTop={1} paddingX={1}>
         <Box gap={1}>
-          <Text color={props.busy ? adnifyTheme.brand : adnifyTheme.success}>{props.busy ? '⠋' : '❯'}</Text>
+          <Text color={props.busy ? adnifyTheme.brandSoft : adnifyTheme.success} bold>
+            {props.busy ? '⠋' : '❯'}
+          </Text>
           {props.value ? (
             <Box>
               <Text color={adnifyTheme.textPrimary}>{props.value}</Text>

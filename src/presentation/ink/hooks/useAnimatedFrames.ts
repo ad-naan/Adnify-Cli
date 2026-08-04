@@ -8,6 +8,10 @@ export interface UseAnimatedFramesOptions {
 /**
  * 轻量帧动画 Hook。
  * 用固定占位的短帧序列制造动态感，避免大范围重渲染和布局抖动。
+ *
+ * NOTE: Ink 7 ships useAnimation() internally, but this custom hook stays
+ * because it supports arbitrary frame arrays (not just a counter) and
+ * conditional activation with interval control — all in one call.
  */
 export function useAnimatedFrames<T>(
   frames: readonly T[],

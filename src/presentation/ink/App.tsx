@@ -102,8 +102,9 @@ export function App(props: AppProps) {
                 <ActivityPulse
                   active
                   animated={enableFullAnimation}
-                  color={adnifyTheme.brandStrong}
-                  idleFrame=".  "
+                  color={adnifyTheme.brandSoft}
+                  idleFrame="·  "
+                  variant="dots"
                 />
                 <Text color={adnifyTheme.brand}>{i18n.t('app.boot.heading')}</Text>
               </Box>
@@ -145,6 +146,7 @@ export function App(props: AppProps) {
           mode={readySession.mode}
           modelLabel={modelLabel}
           busy={controller.isBusy}
+          animateBrand={enableFullAnimation}
           commands={readyBootstrap.localCommands}
           currentSessionId={readySession.id}
           recentSessions={controller.recentSessions}
