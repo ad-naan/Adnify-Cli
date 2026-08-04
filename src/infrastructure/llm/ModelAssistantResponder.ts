@@ -12,6 +12,7 @@ import type { LoggerPort } from '../../application/ports/LoggerPort'
 import type { ModelGatewayPort, ModelMessage } from '../../application/ports/ModelGatewayPort'
 import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
 import type { ContextCompactionPort } from '../../application/ports/ContextCompactionPort'
+import type { CodeIndexerPort, RepoMapBuilderPort } from '../../application/ports/CodeIndexerPort'
 import type { SkillService } from '../skills/SkillService'
 import {
   createCliCommandOutputContent,
@@ -34,6 +35,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     private readonly i18n: AppI18n,
     private readonly skillService?: SkillService,
     private readonly compactor?: ContextCompactionPort,
+    private readonly repoMapBuilder?: RepoMapBuilderPort,
+    private readonly codeIndexer?: CodeIndexerPort,
   ) {}
 
   updateGateway(gateway: ModelGatewayPort, config: ModelConfig): void {
@@ -221,6 +224,9 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       ? await this.skillService.buildListingBlock(command.session.mode)
       : ''
 
+    // Build repo map from code index (if available)
+    const repoMapBlock = await this.buildRepoMapBlock(command)
+
     const systemPrompt = this.buildSystemPrompt(
       command.session,
       command.workspace,
@@ -228,6 +234,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       this.cliConfig.getAssistantPromptSet(),
       command.memoryBlock,
       skillListing,
+      repoMapBlock,
     )
 
     const messages: ModelMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -254,6 +261,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     promptSet: AssistantPromptSet,
     memoryBlock?: string,
     skillListing?: string,
+    repoMapBlock?: string,
   ): string {
     const modePrompt = promptSet.modes[session.mode]
     const toolBlock =
@@ -288,6 +296,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
     if (skillListing) {
       promptParts.push(skillListing, '')
+    }
+
+    if (repoMapBlock) {
+      promptParts.push(repoMapBlock, '')
     }
 
     promptParts.push(
@@ -328,6 +340,64 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     )
 
     return promptParts.join('\n')
+  }
+ 
+  /**
+   * 构建 repo map 文本块。从代码索引提取符号表，计算 PageRank，按 token 预算裁剪。
+   */
+  private async buildRepoMapBlock(command: AssistantResponderCommand): Promise<string> {
+    if (!this.repoMapBuilder || !this.codeIndexer) {
+      return ''
+    }
+
+    try {
+      // Extract chat context: find file paths mentioned in conversation
+      const chatFilePaths = this.extractChatFilePaths(command.session.getMessages())
+      chatFilePaths.push(command.prompt)
+
+      // Budget: allocate ~15% of max tokens to repo map
+      const repoMapBudget = Math.floor(this.config.maxTokens * 0.15)
+
+      const indices = await this.codeIndexer.indexWorkspace(command.workspace.rootPath)
+      const repoMap = this.repoMapBuilder.buildFromIndex(indices, chatFilePaths, repoMapBudget)
+
+      if (repoMap.files.length === 0) {
+        return ''
+      }
+
+      const treeString = this.repoMapBuilder.toTreeString(repoMap)
+
+      return [
+        '## Repository Map',
+        'The following is a ranked map of the codebase. Files are ordered by importance (PageRank).',
+        'Use this to locate code without reading files first.',
+        '```',
+        treeString,
+        '```',
+      ].join('\n')
+    } catch (error) {
+      this.logger.warn('Failed to build repo map', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return ''
+    }
+  }
+
+  /**
+   * 从对话历史中提取看起来像文件路径的字符串。
+   */
+  private extractChatFilePaths(messages: ReadonlyArray<{ content: string }>): string[] {
+    const paths: string[] = []
+    const pathRegex = /([\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts|py|go|rs|java|rb|php|cs|c|cpp|h|hpp))/g
+
+    for (const message of messages) {
+      const matches = message.content.matchAll(pathRegex)
+      for (const match of matches) {
+        paths.push(match[1])
+      }
+    }
+
+    return paths
   }
 
   private truncateForTranscript(content: string, maxLength: number): string {

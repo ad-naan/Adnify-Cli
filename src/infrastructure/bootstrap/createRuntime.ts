@@ -32,6 +32,8 @@ import { FsSkillRepository } from '../skills/FsSkillRepository'
 import { SkillService } from '../skills/SkillService'
 import { McpRegistry } from '../mcp/McpClient'
 import { resolveUiPreferences } from './resolveUiPreferences'
+import { TsLanguageServiceIndexer } from '../indexing/TsLanguageServiceIndexer'
+import { GraphRepoMapBuilder } from '../indexing/GraphRepoMapBuilder'
 
 export type { AdnifyCliRuntime }
 
@@ -87,7 +89,11 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   // Recreate tool executor with MCP registry support
   const toolExecutor = new LocalToolExecutor(toolApproval, mcpRegistry)
 
-  const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n, skillService)
+  // Code indexer + repo map builder (shared singletons, reused across model switches)
+  const codeIndexer = new TsLanguageServiceIndexer(logger)
+  const repoMapBuilder = new GraphRepoMapBuilder(logger)
+
+  const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer)
   let currentResponder = initialStack.responder
   let currentGateway = initialStack.gateway
 
@@ -127,7 +133,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
       return newConfig
     }
 
-    const newStack = createResponderStack(newConfig, config, toolExecutor, logger, i18n, skillService)
+    const newStack = createResponderStack(newConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer)
     currentResponder = newStack.responder
     currentGateway = newStack.gateway
     submitPrompt.updateResponder(currentResponder)
@@ -182,6 +188,8 @@ function createResponderStack(
   logger: LoggerPort,
   i18n: ReturnType<typeof createAppI18n>,
   skillService?: SkillService,
+  repoMapBuilder?: GraphRepoMapBuilder,
+  codeIndexer?: TsLanguageServiceIndexer,
 ) {
   if (!modelConfig.apiKey) {
     logger.info('No API key configured, using unconfigured responder')
@@ -205,6 +213,8 @@ function createResponderStack(
     i18n,
     skillService,
     compactor,
+    repoMapBuilder,
+    codeIndexer,
   )
   return { responder, gateway }
 }
