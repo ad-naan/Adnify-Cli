@@ -20,17 +20,31 @@ import { handleWorkspaceRead } from './handlers/workspaceReadHandler'
 import { handleGlobSearch } from './handlers/globSearchHandler'
 import { handleWebFetch } from './handlers/webFetchHandler'
 import { handleWebSearch } from './handlers/webSearchHandler'
+import type { McpRegistry } from '../mcp/McpClient'
 
 /**
  * 工具调度入口。
  *
  * 分派到 handler，并在动作真正发生前统一做审批判定 —— 审批集中在这一层，
  * 因为只有解析完 payload 才知道「这是读还是写」「这条命令具体是什么」。
+ * MCP 工具（mcp__前缀）委托给 McpRegistry 处理。
  */
 export class LocalToolExecutor implements ToolExecutorPort {
-  constructor(private readonly approval: ToolApprovalPort = autoApproveToolApproval) {}
+  constructor(
+    private readonly approval: ToolApprovalPort = autoApproveToolApproval,
+    private readonly mcpRegistry?: McpRegistry,
+  ) {}
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    // MCP tools are routed to the McpRegistry
+    if (request.toolId.startsWith('mcp__') && this.mcpRegistry) {
+      const mcpResult = await this.mcpRegistry.executeTool(request)
+      if (mcpResult) {
+        return mcpResult
+      }
+      return toolFailure(request.toolId, `MCP tool "${request.toolId}" is not registered.`)
+    }
+
     switch (request.toolId) {
       case 'workspace-read':
         return handleWorkspaceRead(request)

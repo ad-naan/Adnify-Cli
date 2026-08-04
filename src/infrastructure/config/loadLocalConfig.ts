@@ -4,6 +4,7 @@ import type {
   ModelProvider,
   ProvidersMap,
 } from '../../domain/assistant/value-objects/ModelConfig'
+import type { McpServerConfig } from '../mcp/McpClient'
 import { resolveAppStorage } from '../storage/resolveAppStorage'
 
 const VALID_PROVIDERS = new Set<ModelProvider>([
@@ -30,6 +31,14 @@ interface RawConfigFile {
       apiKey?: string
       baseUrl?: string
       models?: string[]
+    }
+  >
+  mcpServers?: Record<
+    string,
+    {
+      command?: string
+      args?: string[]
+      env?: Record<string, string>
     }
   >
 }
@@ -144,4 +153,40 @@ function normalizeInteger(
   max: number,
 ): number {
   return Math.trunc(normalizeNumber(value, fallback, min, max))
+}
+
+/**
+ * 从 config.json 加载 MCP server 配置。
+ *
+ * 格式示例：
+ * ```json
+ * {
+ *   "mcpServers": {
+ *     "filesystem": {
+ *       "command": "npx",
+ *       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+ *     }
+ *   }
+ * }
+ * ```
+ */
+export async function loadMcpServers(
+  options: LoadLocalConfigOptions = {},
+): Promise<McpServerConfig[]> {
+  const fileConfig = await readConfigFile(options)
+  const raw = fileConfig.mcpServers ?? {}
+  const result: McpServerConfig[] = []
+
+  for (const [name, entry] of Object.entries(raw)) {
+    if (entry.command) {
+      result.push({
+        name,
+        command: entry.command,
+        args: entry.args ?? [],
+        env: entry.env,
+      })
+    }
+  }
+
+  return result
 }

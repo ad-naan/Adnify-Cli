@@ -41,6 +41,7 @@ export interface ApplyCliCommandCommand {
   gitRunner?: GitRunner
   memoryStore?: MemoryStoreLike
   skillStore?: SkillStoreLike
+  mcpServerList?: string[]
 }
 
 export interface MemoryStoreLike {
@@ -961,6 +962,26 @@ export class ApplyCliCommandUseCase {
           tone: 'info',
         })
         return persist(`Loaded skill: ${subArg}`)
+      }
+
+      case 'mcp': {
+        addCommandInput()
+        const servers = command.mcpServerList ?? []
+
+        if (servers.length === 0) {
+          addCommandOutput(
+            'No MCP servers connected. Configure them in config.json under "mcpServers".',
+            { title: this.i18n.t('transcript.command'), tone: 'info' },
+          )
+          return persist('No MCP servers connected.')
+        }
+
+        const text = [
+          `Connected MCP servers (${servers.length}):`,
+          ...servers.map((s) => `- ${s}`),
+        ].join('\n')
+        addCommandOutput(text, { title: this.i18n.t('transcript.command'), tone: 'info' })
+        return persist(`Listed ${servers.length} MCP server(s).`)
       }
 
       default: {

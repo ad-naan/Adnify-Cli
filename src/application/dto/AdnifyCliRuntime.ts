@@ -32,4 +32,6 @@ export interface AdnifyCliRuntime {
   memoryStore?: MemoryStoreLike | null
   /** Skill 存储 — 用于 :skill 命令 */
   skillStore?: SkillStoreLike
+  /** 已连接的 MCP 服务器名称列表 — 用于 :mcp 命令 */
+  mcpServerList?: string[]
 }

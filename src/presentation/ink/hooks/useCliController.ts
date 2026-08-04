@@ -58,6 +58,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':checkpoint [message]': 'command.desc.checkpoint',
   ':undo': 'command.desc.undo',
   ':skill [name|list]': 'command.desc.skill',
+  ':mcp': 'command.desc.mcp',
   ':context': 'command.desc.context',
   ':storage': 'command.desc.storage',
   ':storage set [path]': 'command.desc.storage',
@@ -417,6 +418,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           bootstrap,
           memoryStore: memoryStoreRef.current ?? undefined,
           skillStore: params.runtime.skillStore ?? undefined,
+          mcpServerList: params.runtime.mcpServerList ?? undefined,
           configUpdater: {
             applyModelConfig: (nextConfig) => {
               const activeConfig = params.runtime.applyModelConfig(nextConfig)

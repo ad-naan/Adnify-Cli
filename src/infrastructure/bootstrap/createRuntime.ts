@@ -27,9 +27,9 @@ import { SystemClock } from '../system/SystemClock'
 import { LocalToolExecutor } from '../tooling/LocalToolExecutor'
 import { PendingToolApprovalAdapter } from '../tooling/PendingToolApprovalAdapter'
 import { LocalWorkspaceContextService } from '../workspace/LocalWorkspaceContextService'
-import { MemoryStore } from '../storage/MemoryStore'
 import { FsSkillRepository } from '../skills/FsSkillRepository'
 import { SkillService } from '../skills/SkillService'
+import { McpRegistry } from '../mcp/McpClient'
 import { resolveUiPreferences } from './resolveUiPreferences'
 
 export type { AdnifyCliRuntime }
@@ -47,7 +47,6 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const clock = new SystemClock()
   const workspaceContextService = new LocalWorkspaceContextService()
   const toolApproval = new PendingToolApprovalAdapter()
-  const toolExecutor = new LocalToolExecutor(toolApproval)
 
   const skillRepository = new FsSkillRepository({
     workspaceRoot: process.cwd(),
@@ -58,7 +57,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const promptBundle = await loadPromptBundle()
   config.setPromptBundle(promptBundle)
 
-  const { loadModelConfig, loadProviders } = await import('../config/loadLocalConfig')
+  const { loadModelConfig, loadProviders, loadMcpServers } = await import('../config/loadLocalConfig')
   const { writeModelConfig } = await import('../config/writeLocalConfig')
   const modelConfig = await loadModelConfig()
   const providers = await loadProviders()
@@ -67,6 +66,25 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const modelConfigStore: ModelConfigStorePort = {
     save: writeModelConfig,
   }
+
+  // Connect MCP servers (if configured) — non-blocking, failures are logged
+  const mcpRegistry = new McpRegistry(logger)
+  const mcpServers = await loadMcpServers()
+  if (mcpServers.length > 0) {
+    for (const serverConfig of mcpServers) {
+      try {
+        await mcpRegistry.addServer(serverConfig)
+      } catch (error) {
+        logger.warn('Failed to connect MCP server', {
+          name: serverConfig.name,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+  }
+
+  // Recreate tool executor with MCP registry support
+  const toolExecutor = new LocalToolExecutor(toolApproval, mcpRegistry)
 
   const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n, skillService)
   let currentResponder = initialStack.responder
@@ -152,6 +170,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     toolApproval,
     memoryStore: null,
     skillStore: skillService,
+    mcpServerList: mcpRegistry.getConnectedServers(),
   }
 }
 

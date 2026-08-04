@@ -306,35 +306,45 @@ function appendMessageRows(
   }
 }
 
-function buildViewportRows(
-  props: ConversationViewportProps,
+function buildMessageRows(
+  messages: ConversationMessage[],
+  i18n: AppI18n,
   contentWidth: number,
+  hasStreaming: boolean,
 ): ViewportRow[] {
   const rows: ViewportRow[] = []
 
-  props.messages.forEach((message, index) => {
-    appendMessageRows(rows, message, props.i18n, contentWidth)
+  messages.forEach((message, index) => {
+    appendMessageRows(rows, message, i18n, contentWidth)
 
-    if (index < props.messages.length - 1 || props.streamingText) {
+    if (index < messages.length - 1 || hasStreaming) {
       rows.push({ kind: 'spacer', key: `${message.id}-spacer` })
     }
   })
 
-  if (props.streamingText) {
-    rows.push({
-      kind: 'streaming-header',
-      key: 'streaming-header',
-      label: props.i18n.t('conversation.thinking'),
-    })
-    appendWrappedRows(rows, {
-      keyPrefix: 'streaming-body',
-      content: props.streamingText,
-      contentColor: adnifyTheme.textPrimary,
-      contentWidth,
-      indent: 2,
-    })
-  }
+  return rows
+}
 
+function buildStreamingRows(
+  streamingText: string,
+  i18n: AppI18n,
+  contentWidth: number,
+): ViewportRow[] {
+  if (!streamingText) return []
+
+  const rows: ViewportRow[] = []
+  rows.push({
+    kind: 'streaming-header',
+    key: 'streaming-header',
+    label: i18n.t('conversation.thinking'),
+  })
+  appendWrappedRows(rows, {
+    keyPrefix: 'streaming-body',
+    content: streamingText,
+    contentColor: adnifyTheme.textPrimary,
+    contentWidth,
+    indent: 2,
+  })
   return rows
 }
 
@@ -384,9 +394,17 @@ export const ConversationViewport = memo(function ConversationViewport(
     () => Math.max(MIN_CONTENT_WIDTH, terminalColumns - PANEL_HORIZONTAL_CHROME),
     [terminalColumns],
   )
-  const viewportRows = useMemo(
-    () => buildViewportRows(props, contentWidth),
+  const messageRows = useMemo(
+    () => buildMessageRows(props.messages, props.i18n, contentWidth, Boolean(props.streamingText)),
     [contentWidth, props.i18n, props.messages, props.streamingText],
+  )
+  const streamingRows = useMemo(
+    () => buildStreamingRows(props.streamingText ?? '', props.i18n, contentWidth),
+    [contentWidth, props.i18n, props.streamingText],
+  )
+  const viewportRows = useMemo(
+    () => [...messageRows, ...streamingRows],
+    [messageRows, streamingRows],
   )
   const visibleRows = useMemo(() => {
     // 只保留尾部可见行，让长回复留在会话窗里，而不是继续把整个页面向下撑高。

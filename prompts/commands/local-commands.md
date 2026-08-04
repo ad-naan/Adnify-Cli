@@ -32,6 +32,7 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :checkpoint [message]
 - :undo
 - :skill [name|list]
+- :mcp
 - :context
 - :clear
 - :exit
