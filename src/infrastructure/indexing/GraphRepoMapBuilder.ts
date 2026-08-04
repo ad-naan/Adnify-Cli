@@ -111,10 +111,9 @@ export class GraphRepoMapBuilder implements RepoMapBuilderPort {
           targets.add(ref)
         }
       }
-      // Isolated files get self-loops to prevent dangling mass from dominating
-      if (targets.size === 0) {
-        targets.add(file.path)
-      }
+      // Isolated files (no intra-workspace references) become dangling nodes.
+      // Their PageRank weight is redistributed uniformly to all files,
+      // which prevents them from retaining an artificially high score.
       outbound.set(file.path, targets)
 
       // Build inbound edges
