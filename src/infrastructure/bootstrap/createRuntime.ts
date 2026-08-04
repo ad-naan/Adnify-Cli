@@ -16,6 +16,7 @@ import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
 import { DefaultCliConfigAdapter } from '../config/DefaultCliConfigAdapter'
 import { AiSdkGateway } from '../llm/AiSdkGateway'
 import { ModelAssistantResponder } from '../llm/ModelAssistantResponder'
+import { ModelContextCompactor } from '../llm/ModelContextCompactor'
 import { UnconfiguredAssistantResponder } from '../llm/UnconfiguredAssistantResponder'
 import { ConsoleLogger } from '../logging/ConsoleLogger'
 import { FileSessionRepository } from '../persistence/FileSessionRepository'
@@ -194,6 +195,7 @@ function createResponderStack(
   })
 
   const gateway = new AiSdkGateway(modelConfig, logger)
+  const compactor = new ModelContextCompactor(gateway, modelConfig.maxTokens, logger)
   const responder = new ModelAssistantResponder(
     gateway,
     modelConfig,
@@ -202,6 +204,7 @@ function createResponderStack(
     logger,
     i18n,
     skillService,
+    compactor,
   )
   return { responder, gateway }
 }

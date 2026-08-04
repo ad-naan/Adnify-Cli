@@ -11,6 +11,7 @@ import type { CliConfigPort } from '../../application/ports/CliConfigPort'
 import type { LoggerPort } from '../../application/ports/LoggerPort'
 import type { ModelGatewayPort, ModelMessage } from '../../application/ports/ModelGatewayPort'
 import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
+import type { ContextCompactionPort } from '../../application/ports/ContextCompactionPort'
 import type { SkillService } from '../skills/SkillService'
 import {
   createCliCommandOutputContent,
@@ -32,6 +33,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     private readonly logger: LoggerPort,
     private readonly i18n: AppI18n,
     private readonly skillService?: SkillService,
+    private readonly compactor?: ContextCompactionPort,
   ) {}
 
   updateGateway(gateway: ModelGatewayPort, config: ModelConfig): void {
@@ -73,6 +75,33 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       let activeMessages = [...messages]
 
       for (let turn = 0; turn < this.maxAgentTurns; turn += 1) {
+        // Auto-compaction: if context is approaching the token limit, compress
+        if (this.compactor && this.compactor.needsCompaction(activeMessages, this.config.maxTokens)) {
+          const result = await this.compactor.compact(
+            activeMessages,
+            this.config.maxTokens,
+            command.abortSignal,
+          )
+          activeMessages = result.messages
+
+          yield {
+            kind: 'transcript',
+            delta: '',
+            transcript: createCliNoticeContent(
+              [
+                this.i18n.locale === 'en'
+                  ? `Context compressed: ${result.compactedCount} messages summarized (${result.tokensBefore} → ${result.tokensAfter} tokens).`
+                  : `上下文已压缩：摘要了 ${result.compactedCount} 条消息（${result.tokensBefore} → ${result.tokensAfter} tokens）。`,
+              ].join('\n'),
+              {
+                title: this.i18n.locale === 'en' ? 'Context Compacted' : '上下文已压缩',
+                tone: 'info',
+              },
+            ),
+            done: false,
+          }
+        }
+
         // Stream text in real-time. If the response contains a tool call markup,
         // we detect it after the stream completes and suppress the text delta.
         let accumulated = ''
