@@ -19,6 +19,7 @@ import {
   createCliNoticeContent,
 } from '../../application/support/CliTranscriptMarkup'
 import { parseToolCallMarkup } from '../../application/support/ToolCallMarkup'
+import { StreamingToolCallParser } from '../../application/support/StreamingToolCallParser'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
@@ -104,9 +105,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
             done: false,
           }
         }
-
-        // Stream text in real-time. If the response contains a tool call markup,
-        // we detect it after the stream completes and suppress the text delta.
+        // Stream text in real-time with streaming tool-call detection.
+        // The parser holds back partial tag prefixes and suppresses tool-call XML
+        // from being emitted as visible text. Normal prose streams immediately.
+        const streamParser = new StreamingToolCallParser()
         let accumulated = ''
 
         for await (const chunk of this.gateway.streamChat({
@@ -117,17 +119,22 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           abortSignal: command.abortSignal,
         })) {
           accumulated += chunk.delta
+          const parsed = streamParser.push(chunk.delta)
+          if (parsed.text) {
+            yield { kind: 'text', delta: parsed.text, done: false }
+          }
+        }
+
+        const flushResult = streamParser.flush()
+        if (flushResult.text) {
+          yield { kind: 'text', delta: flushResult.text, done: false }
         }
 
         const responseText = accumulated.trim()
-        const toolCall = parseToolCallMarkup(responseText)
+        const toolCall = flushResult.toolCall ?? parseToolCallMarkup(responseText)
 
         if (!toolCall) {
-          yield {
-            kind: 'text',
-            delta: responseText,
-            done: true,
-          }
+          yield { kind: 'text', delta: '', done: true }
           return
         }
 
