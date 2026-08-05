@@ -1,6 +1,7 @@
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import type { AppI18n } from '../i18n/AppI18n'
 import type { ToolApprovalController } from '../ports/ToolApprovalPort'
+import type { HookPort } from '../ports/HookPort'
 import type {
   ApplyCliCommandUseCase,
   MemoryStoreLike,
@@ -34,4 +35,6 @@ export interface AdnifyCliRuntime {
   skillStore?: SkillStoreLike
   /** 已连接的 MCP 服务器名称列表 — 用于 :mcp 命令 */
   mcpServerList?: string[]
+  /** 生命周期 hook 注册器 */
+  hooks?: HookPort
 }

@@ -23,6 +23,7 @@ import { StreamingToolCallParser } from '../../application/support/StreamingTool
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
+import type { HookPort } from '../../application/ports/HookPort'
 
 export class ModelAssistantResponder implements AssistantResponderPort {
   private readonly maxAgentTurns = 20
@@ -38,6 +39,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     private readonly compactor?: ContextCompactionPort,
     private readonly repoMapBuilder?: RepoMapBuilderPort,
     private readonly codeIndexer?: CodeIndexerPort,
+    private readonly hooks?: HookPort,
   ) {}
 
   updateGateway(gateway: ModelGatewayPort, config: ModelConfig): void {
@@ -105,6 +107,21 @@ export class ModelAssistantResponder implements AssistantResponderPort {
             done: false,
           }
         }
+        // Hook: beforeModelRequest (a before* hook returning false aborts)
+        if (this.hooks) {
+          const proceed = await this.hooks.emit({
+            event: 'beforeModelRequest',
+            sessionId: command.session.id,
+            modelName: this.config.model,
+            messageCount: activeMessages.length,
+            timestamp: Date.now(),
+          })
+          if (!proceed) {
+            yield { kind: 'text', delta: '', done: true }
+            return
+          }
+        }
+
         // Stream text in real-time with streaming tool-call detection.
         // The parser holds back partial tag prefixes and suppresses tool-call XML
         // from being emitted as visible text. Normal prose streams immediately.
@@ -131,6 +148,18 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         }
 
         const responseText = accumulated.trim()
+
+        // Hook: afterModelResponse
+        if (this.hooks) {
+          await this.hooks.emit({
+            event: 'afterModelResponse',
+            sessionId: command.session.id,
+            modelName: this.config.model,
+            messageCount: activeMessages.length,
+            timestamp: Date.now(),
+          })
+        }
+
         const toolCall = flushResult.toolCall ?? parseToolCallMarkup(responseText)
 
         if (!toolCall) {
@@ -144,8 +173,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           transcript: createCliNoticeContent(
             [
               this.i18n.locale === 'en'
-                ? 'Executing assistant tool request.'
-                : '正在执行助手工具请求。',
+                ? `Executing assistant tool request (turn ${turn + 1}/${this.maxAgentTurns}).`
+                : `正在执行助手工具请求（第 ${turn + 1}/${this.maxAgentTurns} 轮）。`,
               `tool: ${toolCall.name}`,
               `input: ${this.truncateForTranscript(toolCall.input, 400)}`,
             ].join('\n'),
@@ -157,17 +186,68 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           done: false,
         }
 
+        // Hook: beforeToolExecute
+        if (this.hooks) {
+          const proceed = await this.hooks.emit({
+            event: 'beforeToolExecute',
+            sessionId: command.session.id,
+            toolName: toolCall.name,
+            toolInput: toolCall.input,
+            timestamp: Date.now(),
+          })
+          if (!proceed) {
+            yield {
+              kind: 'transcript',
+              delta: '',
+              transcript: createCliNoticeContent(
+                this.i18n.locale === 'en'
+                  ? 'Tool execution blocked by a hook handler.'
+                  : '工具执行被 hook 拦截。',
+                {
+                  title: `${this.i18n.t('transcript.tools')} · ${toolCall.name}`,
+                  tone: 'warning',
+                },
+              ),
+              done: false,
+            }
+            break
+          }
+        }
+
+        const toolStartTime = Date.now()
+
         const toolResult = await this.toolExecutor.execute({
           toolId: toolCall.name,
           input: toolCall.input,
           workspace: command.workspace,
         })
 
+        const toolElapsedMs = Date.now() - toolStartTime
+
         this.logger.info('Executed assistant tool call', {
           toolId: toolResult.toolId,
           ok: toolResult.ok,
           mode: command.session.mode,
+          elapsedMs: toolElapsedMs,
         })
+
+        // Hook: afterToolExecute
+        if (this.hooks) {
+          await this.hooks.emit({
+            event: 'afterToolExecute',
+            sessionId: command.session.id,
+            toolName: toolResult.toolId,
+            toolInput: toolCall.input,
+            toolOutput: toolResult.content,
+            toolSuccess: toolResult.ok,
+            timestamp: Date.now(),
+          })
+        }
+
+        const elapsedLabel =
+          toolElapsedMs >= 1000
+            ? `${(toolElapsedMs / 1000).toFixed(1)}s`
+            : `${toolElapsedMs}ms`
 
         yield {
           kind: 'transcript',
@@ -181,6 +261,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
                 : this.i18n.locale === 'en'
                   ? 'Tool execution failed.'
                   : '工具执行失败。',
+              `elapsed: ${elapsedLabel}`,
               '',
               this.truncateForTranscript(toolResult.content, 1600),
             ].join('\n'),
@@ -272,7 +353,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
   ): string {
     const modePrompt = promptSet.modes[session.mode]
     const toolBlock =
-      toolCatalog
+      (toolCatalog as Array<{ name: string; category: string; riskLevel: string; description: string }>)
         .map((tool) => `- ${tool.name} [${tool.category}] (${tool.riskLevel}): ${tool.description}`)
         .join('\n') || this.i18n.t('modelPrompt.noTools')
 

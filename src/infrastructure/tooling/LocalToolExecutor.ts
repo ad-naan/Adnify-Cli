@@ -28,7 +28,11 @@ import type { McpRegistry } from '../mcp/McpClient'
  * 分派到 handler，并在动作真正发生前统一做审批判定 —— 审批集中在这一层，
  * 因为只有解析完 payload 才知道「这是读还是写」「这条命令具体是什么」。
  * MCP 工具（mcp__前缀）委托给 McpRegistry 处理。
+ *
+ * 所有工具执行都有 30 秒超时保护，防止卡死 agent 循环。
  */
+const TOOL_EXECUTION_TIMEOUT_MS = 30_000
+
 export class LocalToolExecutor implements ToolExecutorPort {
   constructor(
     private readonly approval: ToolApprovalPort = autoApproveToolApproval,
@@ -36,6 +40,31 @@ export class LocalToolExecutor implements ToolExecutorPort {
   ) {}
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
+    try {
+      return await Promise.race([
+        this.executeInner(request),
+        this.createTimeout(request.toolId),
+      ])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return toolFailure(request.toolId, `Tool execution error: ${message}`)
+    }
+  }
+
+  private createTimeout(toolId: string): Promise<ToolExecutionResult> {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(
+          toolFailure(
+            toolId,
+            `Tool execution timed out after ${TOOL_EXECUTION_TIMEOUT_MS / 1000}s. The task may still be running in the background.`,
+          ),
+        )
+      }, TOOL_EXECUTION_TIMEOUT_MS)
+    })
+  }
+
+  private async executeInner(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
     // MCP tools are routed to the McpRegistry
     if (request.toolId.startsWith('mcp__') && this.mcpRegistry) {
       const mcpResult = await this.mcpRegistry.executeTool(request)

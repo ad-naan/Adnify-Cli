@@ -31,6 +31,7 @@ import { LocalWorkspaceContextService } from '../workspace/LocalWorkspaceContext
 import { FsSkillRepository } from '../skills/FsSkillRepository'
 import { SkillService } from '../skills/SkillService'
 import { McpRegistry } from '../mcp/McpClient'
+import { DefaultHookRegistry } from '../hooks/DefaultHookRegistry'
 import { resolveUiPreferences } from './resolveUiPreferences'
 import { TsLanguageServiceIndexer } from '../indexing/TsLanguageServiceIndexer'
 import { GraphRepoMapBuilder } from '../indexing/GraphRepoMapBuilder'
@@ -50,6 +51,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const clock = new SystemClock()
   const workspaceContextService = new LocalWorkspaceContextService()
   const toolApproval = new PendingToolApprovalAdapter()
+  const hookRegistry = new DefaultHookRegistry(logger)
 
   const skillRepository = new FsSkillRepository({
     workspaceRoot: process.cwd(),
@@ -93,7 +95,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const codeIndexer = new TsLanguageServiceIndexer(logger)
   const repoMapBuilder = new GraphRepoMapBuilder(logger)
 
-  const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer)
+  const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer, hookRegistry)
   let currentResponder = initialStack.responder
   let currentGateway = initialStack.gateway
 
@@ -133,7 +135,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
       return newConfig
     }
 
-    const newStack = createResponderStack(newConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer)
+    const newStack = createResponderStack(newConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer, hookRegistry)
     currentResponder = newStack.responder
     currentGateway = newStack.gateway
     submitPrompt.updateResponder(currentResponder)
@@ -178,6 +180,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     memoryStore: null,
     skillStore: skillService,
     mcpServerList: mcpRegistry.getConnectedServers(),
+    hooks: hookRegistry,
   }
 }
 
@@ -190,6 +193,7 @@ function createResponderStack(
   skillService?: SkillService,
   repoMapBuilder?: GraphRepoMapBuilder,
   codeIndexer?: TsLanguageServiceIndexer,
+  hookRegistry?: DefaultHookRegistry,
 ) {
   if (!modelConfig.apiKey) {
     logger.info('No API key configured, using unconfigured responder')
@@ -203,7 +207,7 @@ function createResponderStack(
   })
 
   const gateway = new AiSdkGateway(modelConfig, logger)
-  const compactor = new ModelContextCompactor(gateway, modelConfig.maxTokens, logger)
+  const compactor = new ModelContextCompactor(gateway, modelConfig.maxTokens, logger, modelConfig.model)
   const responder = new ModelAssistantResponder(
     gateway,
     modelConfig,
@@ -215,6 +219,7 @@ function createResponderStack(
     compactor,
     repoMapBuilder,
     codeIndexer,
+    hookRegistry,
   )
   return { responder, gateway }
 }
