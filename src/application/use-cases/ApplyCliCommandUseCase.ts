@@ -42,6 +42,7 @@ export interface ApplyCliCommandCommand {
   memoryStore?: MemoryStoreLike
   skillStore?: SkillStoreLike
   mcpServerList?: string[]
+  checkpointStore?: CheckpointStoreLike
 }
 
 export interface MemoryStoreLike {
@@ -55,6 +56,20 @@ export interface MemoryStoreLike {
 export interface SkillStoreLike {
   listSkills(): Promise<Array<{ name: string; description: string }>>
   getSkillBody(name: string): Promise<string | undefined>
+}
+
+/**
+ * 文件级检查点存储。
+ * 与 git 检查点（:checkpoint/:undo）互补 —— 这里回滚的是单次工具写入，不依赖 git。
+ */
+export interface CheckpointStoreLike {
+  listSnapshots(): Array<{
+    id: string
+    description: string
+    createdAt: number
+    entries: Array<{ relativePath: string }>
+  }>
+  restore(snapshotId: string): Array<{ relativePath: string }> | null
 }
 
 export interface ApplyCliCommandResult {
@@ -872,6 +887,78 @@ export class ApplyCliCommandUseCase {
           })
           return persist(`Undo failed: ${msg}`)
         }
+      }
+
+      case 'restore': {
+        addCommandInput()
+
+        if (!command.checkpointStore) {
+          addCommandOutput('Checkpoint store not available.', {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist('Checkpoint store not available.')
+        }
+
+        const snapshots = command.checkpointStore.listSnapshots()
+
+        // `:restore` with no argument lists the rollback points.
+        if (!args[0]) {
+          if (snapshots.length === 0) {
+            addCommandOutput(
+              'No file checkpoints yet. They are captured automatically before each approved file write.',
+              { title: this.i18n.t('transcript.command'), tone: 'info' },
+            )
+            return persist('No file checkpoints.')
+          }
+
+          const text = [
+            `File checkpoints (${snapshots.length}), newest first:`,
+            ...snapshots.slice(0, 20).map((snapshot, index) => {
+              const files = snapshot.entries.map((entry) => entry.relativePath).join(', ')
+              return `[${index + 1}] ${snapshot.id}  ${snapshot.description}${files ? ` — ${files}` : ''}`
+            }),
+            '',
+            'Use :restore <id> to roll one back.',
+          ].join('\n')
+
+          addCommandOutput(text, { title: this.i18n.t('transcript.command'), tone: 'info' })
+          return persist(`Showing ${snapshots.length} checkpoint(s).`)
+        }
+
+        // Accept either the snapshot id or its 1-based index from the listing above.
+        const selector = args[0].trim()
+        const byIndex = Number.parseInt(selector, 10)
+        const target =
+          Number.isFinite(byIndex) && String(byIndex) === selector
+            ? snapshots[byIndex - 1]
+            : snapshots.find((snapshot) => snapshot.id === selector)
+
+        if (!target) {
+          addCommandOutput(`No checkpoint matches "${selector}". Use :restore to list them.`, {
+            title: this.i18n.t('transcript.command'),
+            tone: 'warning',
+          })
+          return persist(`Unknown checkpoint "${selector}".`)
+        }
+
+        const restored = command.checkpointStore.restore(target.id)
+        if (!restored) {
+          addCommandOutput(`Failed to restore checkpoint ${target.id}.`, {
+            title: this.i18n.t('transcript.command'),
+            tone: 'danger',
+          })
+          return persist(`Restore failed for ${target.id}.`)
+        }
+
+        addCommandOutput(
+          [
+            `Restored ${restored.length} file(s) from ${target.id}:`,
+            ...restored.map((entry) => `  ${entry.relativePath}`),
+          ].join('\n'),
+          { title: this.i18n.t('transcript.command'), tone: 'success' },
+        )
+        return persist(`Restored ${restored.length} file(s).`)
       }
 
       case 'context': {

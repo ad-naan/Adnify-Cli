@@ -31,6 +31,7 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :memory clear
 - :checkpoint [message]
 - :undo
+- :restore [id|index]
 - :skill [name|list]
 - :mcp
 - :context

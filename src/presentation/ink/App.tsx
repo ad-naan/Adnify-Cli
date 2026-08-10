@@ -1,15 +1,16 @@
 import { Box, Newline, Text, useApp, useInput, useStdout } from 'ink'
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { AdnifyCliRuntime } from '../../application/dto/AdnifyCliRuntime'
 import { adnifyTheme } from './theme'
 import { ActivityPulse } from './components/ActivityPulse'
-import { ConversationViewport } from './components/ConversationViewport'
+import { ConversationViewport, conversationBodyRows } from './components/ConversationViewport'
 import { EmptyState } from './components/EmptyState'
 import { HeaderBar } from './components/HeaderBar'
 import { InputDock } from './components/InputDock'
 import { Panel } from './components/Panel'
 import { StatusDock } from './components/StatusDock'
 import { useCliController } from './hooks/useCliController'
+import { useViewportScroll } from './hooks/useViewportScroll'
 
 export interface AppProps {
   runtime: AdnifyCliRuntime
@@ -28,8 +29,6 @@ export function App(props: AppProps) {
   const animationLevel = props.runtime.ui.animationLevel
   const enableFullAnimation = animationLevel === 'full'
 
-  useInput(controller.handleInput)
-
   const bootstrap = controller.bootstrap
   const session = controller.session
   const workspace = bootstrap?.workspace
@@ -39,8 +38,10 @@ export function App(props: AppProps) {
   const workspaceName = workspace
     ? workspace.rootPath.split(/[\\/]/).filter(Boolean).pop() ?? workspace.rootPath
     : i18n.t('app.boot.workspaceName')
+  // 渲染完整历史而不是最近 24 条 —— 视口只切显示窗口，
+  // 早先的消息留在数组里才翻得回去；截断在这一层就等于永久丢失。
   const messages = useMemo(
-    () => [...(session?.getRecentMessages(24) ?? []), ...controller.streamingMessages],
+    () => [...(session?.getMessages() ?? []), ...controller.streamingMessages],
     [controller.streamingMessages, session],
   )
   const showEmptyState =
@@ -62,19 +63,78 @@ export function App(props: AppProps) {
   const statusRows = controller.isBusy ? 0 : 2
   const layoutGapRows = showEmptyState ? 1 : 2
   const safetyRows = 2
+  // 会话区吃掉终端剩下的全部高度。
+  // 这里曾经有个 Math.min(12, …) 的硬上限，导致 50 行的终端也只给会话区 12 行；
+  // 既然现在可以滚动，多出来的高度是实打实能用的，不再设上限。
   const conversationViewportRows = Math.max(
     4,
-    Math.min(
-      12,
-      terminalRows -
-        headerRows -
-        inputRows -
-        statusRows -
-        layoutGapRows -
-        viewportChromeRows -
-        safetyRows,
-    ),
+    terminalRows -
+      headerRows -
+      inputRows -
+      statusRows -
+      layoutGapRows -
+      viewportChromeRows -
+      safetyRows,
   )
+  const [totalViewportRows, setTotalViewportRows] = useState(0)
+  // 按正文高度算滚动上限：顶部那行提示条不显示内容，
+  // 用整个视口高度算的话最早一行会永远翻不到。
+  const scroll = useViewportScroll(
+    totalViewportRows,
+    conversationBodyRows(conversationViewportRows),
+  )
+
+  // 滚动键先于其它输入处理：PgUp/PgDn 在会话区之外没有别的用途，
+  // 而且审批面板活跃时也应该能翻上去看清究竟要批准什么。
+  const handleInput = useCallback(
+    (input: string, key: Parameters<typeof controller.handleInput>[1]) => {
+      if (key.pageUp) {
+        // 翻一屏时留一行重叠，避免跨屏的那一行被跳过去。
+        scroll.scrollUp(Math.max(1, conversationViewportRows - 1))
+        return
+      }
+
+      if (key.pageDown) {
+        scroll.scrollDown(Math.max(1, conversationViewportRows - 1))
+        return
+      }
+
+      // End 直接回到最新，Home 直接跳到最早 —— 长会话里逐屏翻太慢。
+      if (key.end) {
+        scroll.scrollToBottom()
+        return
+      }
+
+      if (key.home && totalViewportRows > conversationViewportRows) {
+        scroll.scrollUp(totalViewportRows)
+        return
+      }
+
+      // 翻上去之后 Esc 先用来回到底部 —— 但执行中和审批中不行，
+      // 那两种状态下 Esc 是「中止 / 拒绝」，抢走它会让用户没法叫停。
+      if (
+        key.escape &&
+        scroll.isScrolled &&
+        !controller.isBusy &&
+        !controller.toolApprovalPrompt
+      ) {
+        scroll.scrollToBottom()
+        return
+      }
+
+      controller.handleInput(input, key)
+    },
+    [
+      conversationViewportRows,
+      controller.handleInput,
+      controller.isBusy,
+      controller.toolApprovalPrompt,
+      scroll,
+      totalViewportRows,
+    ],
+  )
+
+  useInput(handleInput)
 
   if (controller.isBooting) {
     return (
@@ -173,6 +233,8 @@ export function App(props: AppProps) {
               messages={messages}
               streamingText={controller.streamingText}
               viewportRows={conversationViewportRows}
+              scrollOffset={scroll.offset}
+              onTotalRowsChange={setTotalViewportRows}
               animateStreamingIndicator={enableFullAnimation}
               i18n={i18n}
             />

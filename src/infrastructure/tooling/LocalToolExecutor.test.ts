@@ -3,12 +3,21 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalToolExecutor } from './LocalToolExecutor'
+import { CheckpointManager } from '../checkpoint/CheckpointManager'
 import { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import type { ToolApprovalPort } from '../../application/ports/ToolApprovalPort'
 import type {
   ToolActionIntent,
   ToolApprovalDecision,
 } from '../../domain/tooling/value-objects/ToolApproval'
+
+/** 检查点用例不关心日志输出。 */
+const silentLogger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+}
 
 /** 只读用例复用仓库自身作为工作区，避免依赖某台机器上的绝对路径。 */
 function createWorkspace(rootPath: string = process.cwd()) {
@@ -329,6 +338,74 @@ describe('LocalToolExecutor approval gate', () => {
 
       expect(result.ok).toBe(true)
       expect(approval.asked).toHaveLength(1)
+    })
+  })
+
+  test('should snapshot the previous content before an approved overwrite', async () => {
+    await withTempWorkspace(async (workspace) => {
+      const approval = createApprovalSpy('approved')
+      const checkpoints = new CheckpointManager(workspace.rootPath, silentLogger as never)
+      const executor = new LocalToolExecutor(approval.port, undefined, checkpoints)
+
+      await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"write","path":"tracked.txt","content":"first","allowWrite":true}',
+        workspace,
+      })
+      await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"write","path":"tracked.txt","content":"second","allowWrite":true}',
+        workspace,
+      })
+
+      // The newest snapshot holds the content as it was before the second write.
+      const snapshots = checkpoints.listSnapshots()
+      expect(snapshots.length).toBe(2)
+      expect(snapshots[0].entries[0]).toMatchObject({
+        relativePath: 'tracked.txt',
+        originalContent: 'first',
+      })
+
+      // Rolling it back returns the file to its pre-overwrite state.
+      checkpoints.restore(snapshots[0].id)
+      const readBack = await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"read","path":"tracked.txt"}',
+        workspace,
+      })
+      expect(readBack.content).toContain('first')
+    })
+  })
+
+  test('should not snapshot when the write is denied', async () => {
+    await withTempWorkspace(async (workspace) => {
+      const approval = createApprovalSpy('denied')
+      const checkpoints = new CheckpointManager(workspace.rootPath, silentLogger as never)
+      const executor = new LocalToolExecutor(approval.port, undefined, checkpoints)
+
+      await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"write","path":"denied.txt","content":"nope","allowWrite":true}',
+        workspace,
+      })
+
+      expect(checkpoints.listSnapshots()).toHaveLength(0)
+    })
+  })
+
+  test('should not snapshot on read-only file-ops', async () => {
+    await withTempWorkspace(async (workspace) => {
+      const approval = createApprovalSpy('approved')
+      const checkpoints = new CheckpointManager(workspace.rootPath, silentLogger as never)
+      const executor = new LocalToolExecutor(approval.port, undefined, checkpoints)
+
+      await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"list","path":"."}',
+        workspace,
+      })
+
+      expect(checkpoints.listSnapshots()).toHaveLength(0)
     })
   })
 

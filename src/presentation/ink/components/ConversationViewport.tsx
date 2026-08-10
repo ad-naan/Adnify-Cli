@@ -1,12 +1,13 @@
 import { Box, Text, useStdout } from 'ink'
 import type { AppI18n } from '../../../application/i18n/AppI18n'
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo } from 'react'
 import {
   parseCliTranscriptMarkup,
   type CliTranscriptTone,
 } from '../../../application/support/CliTranscriptMarkup'
 import type { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import { adnifyTheme } from '../theme'
+import { sliceVisibleRows } from '../hooks/viewportScrollMath'
 import { ActivityPulse } from './ActivityPulse'
 import { Panel } from './Panel'
 
@@ -14,6 +15,10 @@ export interface ConversationViewportProps {
   messages: ConversationMessage[]
   streamingText?: string
   viewportRows: number
+  /** 距底部的行数偏移，0 表示跟随最新内容。 */
+  scrollOffset?: number
+  /** 报告内容总行数，让上层知道还能往上翻多少。 */
+  onTotalRowsChange?: (totalRows: number) => void
   animateStreamingIndicator?: boolean
   i18n: AppI18n
 }
@@ -386,6 +391,60 @@ function renderViewportRow(row: ViewportRow, animateStreamingIndicator: boolean)
   )
 }
 
+/**
+ * 内容超出视口时，顶部要占掉一行做提示条，正文只剩下面这么多。
+ *
+ * 滚动上限必须按这个高度算 —— 按整个视口高度算会差出一行，
+ * 最顶上那行内容会永远翻不到。
+ */
+export function conversationBodyRows(viewportRows: number): number {
+  return Math.max(1, viewportRows - 1)
+}
+
+/**
+ * 顶部提示条：上面藏了多少行，以及是否已经落后于最新内容。
+ *
+ * 这一行是「内容被藏起来了」与「内容丢了」的唯一区别，所以宁可退化也不能不显示。
+ * 窄终端放不下完整文案时退到短版本，只有连短版本都放不下才用裸省略号。
+ */
+function buildHiddenAboveLabel(
+  hiddenAbove: number,
+  hiddenBelow: number,
+  contentWidth: number,
+  i18n: AppI18n,
+): string {
+  // 往上翻之后新内容还在往下堆，不提示的话用户会以为界面卡住了。
+  if (hiddenBelow > 0) {
+    const scrolled = i18n.t('conversation.scrollPosition', {
+      above: hiddenAbove,
+      below: hiddenBelow,
+    })
+    if (scrolled.length <= contentWidth) {
+      return scrolled
+    }
+
+    const shortScrolled = i18n.t('conversation.scrollPositionShort', {
+      above: hiddenAbove,
+      below: hiddenBelow,
+    })
+    return shortScrolled.length <= contentWidth ? shortScrolled : '…'
+  }
+
+  if (hiddenAbove <= 0) {
+    return i18n.t('conversation.scrollTop')
+  }
+
+  const full = hiddenAbove === 1
+    ? i18n.t('conversation.scrollHiddenOne')
+    : i18n.t('conversation.scrollHidden', { count: hiddenAbove })
+  if (full.length <= contentWidth) {
+    return full
+  }
+
+  const short = i18n.t('conversation.scrollHiddenShort', { count: hiddenAbove })
+  return short.length <= contentWidth ? short : '…'
+}
+
 export const ConversationViewport = memo(function ConversationViewport(
   props: ConversationViewportProps,
 ) {
@@ -407,22 +466,35 @@ export const ConversationViewport = memo(function ConversationViewport(
     () => [...messageRows, ...streamingRows],
     [messageRows, streamingRows],
   )
+  const scrollOffset = props.scrollOffset ?? 0
+
+  // 行数是在这里才算出来的（依赖终端宽度和换行），上层要靠它决定能翻多远。
+  const { onTotalRowsChange } = props
+  useEffect(() => {
+    onTotalRowsChange?.(viewportRows.length)
+  }, [onTotalRowsChange, viewportRows.length])
   const visibleRows = useMemo(() => {
-    // 只保留尾部可见行，让长回复留在会话窗里，而不是继续把整个页面向下撑高。
+    // 只渲染当前这一屏。offset 从底部起算，0 就是贴着最新内容。
     if (viewportRows.length <= props.viewportRows) {
       return viewportRows
     }
+
+    // 顶部留一行给提示条，告诉用户上面还藏着多少内容 ——
+    // 会话区没有终端原生 scrollback，不说清楚就等同于内容凭空消失。
+    const bodyRows = conversationBodyRows(props.viewportRows)
+    const body = sliceVisibleRows(viewportRows, scrollOffset, bodyRows)
+    const hiddenAbove = viewportRows.length - scrollOffset - body.length
 
     return [
       {
         kind: 'text',
         key: 'viewport-overflow-indicator',
-        content: '...',
+        content: buildHiddenAboveLabel(hiddenAbove, scrollOffset, contentWidth, props.i18n),
         contentColor: adnifyTheme.textDim,
       } satisfies TextViewportRow,
-      ...viewportRows.slice(-(props.viewportRows - 1)),
+      ...body,
     ]
-  }, [props.viewportRows, viewportRows])
+  }, [contentWidth, props.i18n, props.viewportRows, scrollOffset, viewportRows])
   const fillerCount = Math.max(0, props.viewportRows - visibleRows.length)
 
   return (

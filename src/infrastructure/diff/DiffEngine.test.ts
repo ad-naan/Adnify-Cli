@@ -3,10 +3,9 @@ import { computeLineDiff, computeDiffStats, formatDiffAsText } from './DiffEngin
 
 describe('DiffEngine', () => {
   describe('computeLineDiff', () => {
-    test('returns empty for two empty strings', () => {
-      const ops = computeLineDiff('', '')
-      expect(ops.length).toBe(1) // one empty equal line
-      expect(ops[0].type).toBe('equal')
+    test('returns no ops for two empty strings', () => {
+      // 空文本是零行，不是「一行空串」—— 否则新建文件会多出一行幽灵改动。
+      expect(computeLineDiff('', '')).toHaveLength(0)
     })
 
     test('all additions for new content', () => {
@@ -85,16 +84,58 @@ describe('DiffEngine', () => {
       expect(result).toContain('@@')
     })
 
-    test('marks additions with +', () => {
+    test('marks additions with + and no space after the sign', () => {
       const ops = computeLineDiff('a\nb', 'a\nb\nc')
       const result = formatDiffAsText(ops, 'src/test.ts')
-      expect(result).toContain('+ c')
+      expect(result.split('\n')).toContain('+c')
+      // 多一个空格就不是合法 unified diff，git apply 会拒绝。
+      expect(result.split('\n')).not.toContain('+ c')
     })
 
-    test('marks removals with -', () => {
+    test('marks removals with - and no space after the sign', () => {
       const ops = computeLineDiff('a\nb\nc', 'a\nb')
       const result = formatDiffAsText(ops, 'src/test.ts')
-      expect(result).toContain('- c')
+      expect(result.split('\n')).toContain('-c')
+      expect(result.split('\n')).not.toContain('- c')
+    })
+
+    test('prefixes context lines with exactly one space', () => {
+      const ops = computeLineDiff('a\nb\nc', 'a\nB\nc')
+      const result = formatDiffAsText(ops, 'src/test.ts')
+      expect(result.split('\n')).toContain(' a')
+    })
+
+    test('omits the count in a hunk range when it is 1', () => {
+      const ops = computeLineDiff('a', 'b')
+      const result = formatDiffAsText(ops, 'src/test.ts')
+      // git 写 `@@ -1 +1 @@`，不写 `@@ -1,1 +1,1 @@`。
+      expect(result).toContain('@@ -1 +1 @@')
+    })
+
+    test('uses /dev/null and a 0,0 range for a new file', () => {
+      const ops = computeLineDiff('', 'x\ny\n')
+      const result = formatDiffAsText(ops, 'src/new.ts')
+      expect(result).toContain('--- /dev/null')
+      expect(result).toContain('+++ b/src/new.ts')
+      expect(result).toContain('@@ -0,0 +1,2 @@')
+      // 空的「原内容」不该产生一行幽灵删除。
+      expect(result.split('\n').some((line) => line.startsWith('-') && line !== '--- /dev/null'))
+        .toBe(false)
+    })
+
+    test('uses /dev/null on the new side for a deleted file', () => {
+      const ops = computeLineDiff('x\n', '')
+      const result = formatDiffAsText(ops, 'src/gone.ts')
+      expect(result).toContain('--- a/src/gone.ts')
+      expect(result).toContain('+++ /dev/null')
+      expect(result).toContain('@@ -1 +0,0 @@')
+    })
+
+    test('trailing newline does not produce a phantom line', () => {
+      // 'a\n' 是一行，不是两行 —— 结尾换行符只是行终止符。
+      const ops = computeLineDiff('a\n', 'a\n')
+      expect(ops.length).toBe(1)
+      expect(ops[0].content).toBe('a')
     })
   })
 })

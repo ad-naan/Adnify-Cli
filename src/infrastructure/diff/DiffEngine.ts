@@ -20,6 +20,26 @@ export interface DiffOp {
 }
 
 /**
+ * 按行切分，并丢掉行尾换行符产生的那个空串。
+ *
+ * `'a\n'.split('\n')` 会得到 `['a', '']`，那个空串不是一行内容，
+ * 而是「文件以换行结尾」的副产物。不剔掉它，新建文件就会多出一行幽灵改动。
+ * 空文本视为零行 —— 这样与 git 的 `/dev/null` 语义一致。
+ */
+function splitLines(text: string): string[] {
+  if (text === '') {
+    return []
+  }
+
+  const lines = text.split('\n')
+  if (lines[lines.length - 1] === '') {
+    lines.pop()
+  }
+
+  return lines
+}
+
+/**
  * 行级 Myers diff。
  *
  * 时间复杂度 O(ND)，其中 N = 总行数，D = 差异行数。
@@ -29,8 +49,8 @@ export function computeLineDiff(
   oldText: string,
   newText: string,
 ): DiffOp[] {
-  const oldLines = oldText.split('\n')
-  const newLines = newText.split('\n')
+  const oldLines = splitLines(oldText)
+  const newLines = splitLines(newText)
   const m = oldLines.length
   const n = newLines.length
 
@@ -254,17 +274,20 @@ export function computeDiffStats(ops: DiffOp[]): DiffStats {
 }
 
 /**
- * 将 diff 操作列表格式化为带颜色的 ANSI 文本。
+ * 将 diff 操作列表格式化为标准 unified diff 文本（无 ANSI 颜色，着色是渲染层的事）。
+ *
+ * 严格对齐 git 的字节格式，因此输出可以直接喂给 `git apply` / `patch`：
+ * 符号占第 0 列且后面不加空格，行数为 1 时省略 `,1`。
  *
  * 输出格式：
  * ```
  * --- a/src/foo.ts
  * +++ b/src/foo.ts
  * @@ -10,5 +10,7 @@
- *   unchanged line
- * - removed line
- * + added line
- *   unchanged line
+ *  unchanged line
+ * -removed line
+ * +added line
+ *  unchanged line
  * ```
  */
 export function formatDiffAsText(
@@ -273,8 +296,11 @@ export function formatDiffAsText(
   contextLines = 3,
 ): string {
   const lines: string[] = []
-  lines.push(`--- a/${filePath}`)
-  lines.push(`+++ b/${filePath}`)
+  // 新建 / 删除文件时另一侧不存在，git 用 /dev/null 表示，且起始行号为 0。
+  const isCreation = ops.length > 0 && ops.every((op) => op.type === 'add')
+  const isDeletion = ops.length > 0 && ops.every((op) => op.type === 'remove')
+  lines.push(isCreation ? '--- /dev/null' : `--- a/${filePath}`)
+  lines.push(isDeletion ? '+++ /dev/null' : `+++ b/${filePath}`)
 
   let i = 0
   while (i < ops.length) {
@@ -317,17 +343,42 @@ export function formatDiffAsText(
     const oldCount = ops.slice(hunkStart, hunkEnd).filter((op) => op.type !== 'add').length
     const newCount = ops.slice(hunkStart, hunkEnd).filter((op) => op.type !== 'remove').length
 
-    lines.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`)
+    lines.push(formatHunkHeader(oldStart, oldCount, newStart, newCount))
 
     // Render hunk lines
     for (let j = hunkStart; j < hunkEnd; j++) {
       const op = ops[j]
       const prefix = op.type === 'add' ? '+' : op.type === 'remove' ? '-' : ' '
-      lines.push(`${prefix} ${op.content}`)
+      // 符号占第 0 列，后面直接跟内容 —— 多一个空格就不是合法 unified diff，
+      // git apply / patch 会拒绝，且内容本身的缩进会被篡改。
+      lines.push(`${prefix}${op.content}`)
     }
 
     i = hunkEnd
   }
 
   return lines.join('\n')
+}
+
+/**
+ * 组装 `@@ -a,b +c,d @@`。
+ *
+ * 两处与 git 对齐的细节：行数为 1 时省略 `,1`；某一侧为空时起始行号是 0 而不是 1
+ * （新建文件的 `@@ -0,0 +1,3 @@`）。
+ */
+function formatHunkHeader(
+  oldStart: number,
+  oldCount: number,
+  newStart: number,
+  newCount: number,
+): string {
+  return `@@ -${formatRange(oldStart, oldCount)} +${formatRange(newStart, newCount)} @@`
+}
+
+function formatRange(start: number, count: number): string {
+  if (count === 0) {
+    return '0,0'
+  }
+
+  return count === 1 ? `${start}` : `${start},${count}`
 }

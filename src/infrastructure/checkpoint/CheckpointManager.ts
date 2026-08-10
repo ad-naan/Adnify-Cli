@@ -81,15 +81,13 @@ export class CheckpointManager {
       originalContent = null
     }
 
-    const timestamp = Date.now()
-    const id = this.generateId(timestamp)
     const entry: CheckpointEntry = {
       relativePath: normalizedPath,
       originalContent,
-      timestamp,
+      timestamp: Date.now(),
     }
 
-    return id
+    return this.commitSnapshot([entry], description)
   }
 
   /**

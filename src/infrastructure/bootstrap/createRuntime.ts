@@ -26,6 +26,7 @@ import { resolveAppStorage } from '../storage/resolveAppStorage'
 import { CryptoIdGenerator } from '../system/CryptoIdGenerator'
 import { SystemClock } from '../system/SystemClock'
 import { LocalToolExecutor } from '../tooling/LocalToolExecutor'
+import { CheckpointManager } from '../checkpoint/CheckpointManager'
 import { PendingToolApprovalAdapter } from '../tooling/PendingToolApprovalAdapter'
 import { LocalWorkspaceContextService } from '../workspace/LocalWorkspaceContextService'
 import { FsSkillRepository } from '../skills/FsSkillRepository'
@@ -88,8 +89,12 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     }
   }
 
+  // File-level checkpoints — snapshots each approved file-ops write so `:restore` can revert it.
+  // Independent of the git-based `:checkpoint`/`:undo` pair: works even outside a git repository.
+  const checkpointManager = new CheckpointManager(process.cwd(), logger)
+
   // Recreate tool executor with MCP registry support
-  const toolExecutor = new LocalToolExecutor(toolApproval, mcpRegistry)
+  const toolExecutor = new LocalToolExecutor(toolApproval, mcpRegistry, checkpointManager)
 
   // Code indexer + repo map builder (shared singletons, reused across model switches)
   const codeIndexer = new TsLanguageServiceIndexer(logger)
@@ -181,6 +186,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     skillStore: skillService,
     mcpServerList: mcpRegistry.getConnectedServers(),
     hooks: hookRegistry,
+    checkpoints: checkpointManager,
   }
 }
 

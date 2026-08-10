@@ -419,6 +419,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           memoryStore: memoryStoreRef.current ?? undefined,
           skillStore: params.runtime.skillStore ?? undefined,
           mcpServerList: params.runtime.mcpServerList ?? undefined,
+          checkpointStore: params.runtime.checkpoints ?? undefined,
           configUpdater: {
             applyModelConfig: (nextConfig) => {
               const activeConfig = params.runtime.applyModelConfig(nextConfig)

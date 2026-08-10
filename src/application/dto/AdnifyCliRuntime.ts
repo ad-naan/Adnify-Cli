@@ -4,6 +4,7 @@ import type { ToolApprovalController } from '../ports/ToolApprovalPort'
 import type { HookPort } from '../ports/HookPort'
 import type {
   ApplyCliCommandUseCase,
+  CheckpointStoreLike,
   MemoryStoreLike,
   SkillStoreLike,
 } from '../use-cases/ApplyCliCommandUseCase'
@@ -37,4 +38,6 @@ export interface AdnifyCliRuntime {
   mcpServerList?: string[]
   /** 生命周期 hook 注册器 */
   hooks?: HookPort
+  /** 文件级检查点 — 用于 :restore 回滚单次工具写入 */
+  checkpoints?: CheckpointStoreLike
 }

@@ -15,6 +15,11 @@ export interface ToolActionIntent {
   summary: string
   /** 受影响的工作区相对路径，只读类操作可以为空。 */
   targetPath?: string
+  /**
+   * 改动预览（统一 diff 文本），仅写入类操作提供。
+   * 让用户在批准前看到「将要发生什么」—— 此时改动还没落盘，git diff 看不到。
+   */
+  preview?: string
 }
 
 export function isApprovedDecision(decision: ToolApprovalDecision): boolean {

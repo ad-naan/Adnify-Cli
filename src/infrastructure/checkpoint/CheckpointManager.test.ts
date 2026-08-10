@@ -32,6 +32,37 @@ describe('CheckpointManager', () => {
     cleanup(dir)
   })
 
+  test('captureBeforeWrite returns an id that restores the original content', () => {
+    const { dir, manager } = createTempManager()
+    const filePath = path.join(dir, 'test.ts')
+    fs.writeFileSync(filePath, 'original content', 'utf8')
+
+    const id = manager.captureBeforeWrite('test.ts', 'write test.ts')
+
+    // Simulate the tool overwriting the file after the snapshot was taken.
+    fs.writeFileSync(filePath, 'clobbered by tool', 'utf8')
+
+    const restored = manager.restore(id)
+    expect(restored).not.toBeNull()
+    expect(restored!.length).toBe(1)
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('original content')
+    cleanup(dir)
+  })
+
+  test('captureBeforeWrite snapshot of a missing file restores by deleting it', () => {
+    const { dir, manager } = createTempManager()
+    const filePath = path.join(dir, 'created.ts')
+
+    const id = manager.captureBeforeWrite('created.ts', 'create new file')
+
+    // Simulate the tool creating the file after the snapshot was taken.
+    fs.writeFileSync(filePath, 'newly created', 'utf8')
+
+    manager.restore(id)
+    expect(fs.existsSync(filePath)).toBe(false)
+    cleanup(dir)
+  })
+
   test('captureBeforeWrite handles non-existent file', () => {
     const { dir, manager } = createTempManager()
     const id = manager.captureBeforeWrite('nonexistent.ts', 'create new file')

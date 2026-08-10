@@ -98,6 +98,12 @@ function buildPromptText(intent: ToolActionIntent, i18n: AppI18n): string {
     lines.push(`  ${i18n.t('approval.targetLabel', { value: intent.targetPath })}`)
   }
 
+  // 写入类操作附带改动预览 —— 改动还没落盘，这是用户批准前唯一能看到它的地方。
+  if (intent.preview) {
+    lines.push('')
+    lines.push(...intent.preview.split('\n').map((line) => `  ${line}`))
+  }
+
   // 按键说明由 InputDock 单独渲染在面板底部，这里不再重复。
   return lines.join('\n')
 }
