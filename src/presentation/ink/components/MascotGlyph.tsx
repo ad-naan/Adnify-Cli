@@ -9,55 +9,56 @@ export interface MascotGlyphProps {
   animated?: boolean
 }
 
-/**
- * 终端吉祥物采用固定尺寸字形拼装。
- * 纯静态渲染，仅通过 active 状态改变"眼神"和颜色。
- * 当 animated 且 active 时，visor 区域有微妙的旋转动效。
- */
+/** 原创水獭字形：圆耳、浅色口鼻、胸前小爪与水面尾波共同构成识别特征。 */
 export const MascotGlyph = memo(function MascotGlyph(props: MascotGlyphProps) {
   const isBusy = props.active ?? false
-
-  // Subtle busy-eye animation: cycles between "〰" and "≈"
-  const eye = useAnimatedFrames(['〰', '≈'] as const, {
+  const eyes = useAnimatedFrames(['•  •', '─  ─', '•  •', '•  •'] as const, {
     active: Boolean(isBusy && props.animated),
-    intervalMs: 300,
+    intervalMs: 240,
+  })
+  const wake = useAnimatedFrames(['≈', '≋', '~', '≋'] as const, {
+    active: Boolean(isBusy && props.animated),
+    intervalMs: 160,
   })
 
-  const busyEyes = props.animated ? `${eye}   ${eye}` : '〰   〰'
-
-  const face = (
-    <Box flexDirection="column" flexShrink={0} alignItems="center">
-      <Text>
-        <Text color={adnifyTheme.mascotShell}> ▗</Text>
-        <Text
-          color={isBusy ? adnifyTheme.brandStrong : adnifyTheme.textPrimary}
-          backgroundColor={adnifyTheme.mascotVisor}
-        >
-          {isBusy ? busyEyes : '•   •'}
-        </Text>
-        <Text color={adnifyTheme.mascotShell}>▖ </Text>
-      </Text>
-      <Text>
-        <Text color={adnifyTheme.mascotShell}>▐ </Text>
-        <Text
-          color={isBusy ? adnifyTheme.brand : adnifyTheme.mascotCore}
-          backgroundColor={adnifyTheme.surfaceSoft}
-        >
-          ▅▅▅▅▅
-        </Text>
-        <Text color={adnifyTheme.mascotShell}> ▌</Text>
-      </Text>
-      <Text color={adnifyTheme.mascotShell}>  ▝▘ ▝▘  </Text>
-    </Box>
-  )
-
-  if (props.large) {
+  if (!props.large) {
     return (
-      <Box padding={1} borderStyle="round" borderColor={adnifyTheme.borderMuted} marginBottom={1}>
-        {face}
+      <Box flexDirection="column" flexShrink={0}>
+        <Text>
+          <Text color={adnifyTheme.mascotWater}>{wake}</Text>
+          <Text color={adnifyTheme.mascotFurSoft}>╭</Text>
+          <Text color={adnifyTheme.mascotFur}>•ᴥ•</Text>
+          <Text color={adnifyTheme.mascotFurSoft}>╮</Text>
+          <Text color={adnifyTheme.mascotWater}>{wake}</Text>
+        </Text>
+        <Text color={adnifyTheme.mascotWater}> ≈╰┬╯≈ </Text>
       </Box>
     )
   }
 
-  return face
+  return (
+    <Box flexDirection="column" flexShrink={0} alignItems="center">
+      <Text>
+        <Text color={adnifyTheme.mascotFurSoft}>  ╭─╮   ╭─╮  </Text>
+      </Text>
+      <Text>
+        <Text color={adnifyTheme.mascotFur}> ╭╯ </Text>
+        <Text color={isBusy ? adnifyTheme.brandSoft : adnifyTheme.textPrimary}>{eyes}</Text>
+        <Text color={adnifyTheme.mascotFur}> ╰╮ </Text>
+      </Text>
+      <Text>
+        <Text color={adnifyTheme.mascotWater}>{wake}</Text>
+        <Text color={adnifyTheme.mascotFur}>┫   </Text>
+        <Text color={adnifyTheme.mascotMuzzle}>ᴥ</Text>
+        <Text color={adnifyTheme.mascotFur}>   ┣</Text>
+        <Text color={adnifyTheme.mascotWater}>{wake}</Text>
+      </Text>
+      <Text color={adnifyTheme.mascotFur}>╰╮  ╰┬╯  ╭╯</Text>
+      <Text>
+        <Text color={adnifyTheme.mascotWater}>{wake.repeat(2)}</Text>
+        <Text color={adnifyTheme.mascotFurSoft}>╰───────╯</Text>
+        <Text color={adnifyTheme.mascotWater}>{wake.repeat(2)}</Text>
+      </Text>
+    </Box>
+  )
 })

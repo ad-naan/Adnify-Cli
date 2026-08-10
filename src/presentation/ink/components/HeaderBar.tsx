@@ -1,11 +1,10 @@
-import { Box, Text } from 'ink'
+import { Box, Text, useStdout } from 'ink'
 import { memo } from 'react'
 import type { AppI18n } from '../../../application/i18n/AppI18n'
 import type { AssistantMode } from '../../../domain/assistant/value-objects/AssistantMode'
 import type { PackageManagerName } from '../../../domain/workspace/entities/WorkspaceContext'
 import { adnifyTheme } from '../theme'
 import { ActivityPulse } from './ActivityPulse'
-import { Panel } from './Panel'
 import { Wordmark } from './Wordmark'
 
 export interface HeaderBarProps {
@@ -31,34 +30,31 @@ function ModeBadge(props: { mode: AssistantMode; busy?: boolean }) {
         : adnifyTheme.success
 
   return (
-    <Text backgroundColor={color} color={adnifyTheme.surface} bold>
-      {' '}
-      {props.mode.toUpperCase()}
-      {props.busy ? ' ●' : ''}
-      {' '}
+    <Text color={color} bold>
+      {props.busy ? '● ' : '◇ '}{props.mode.toUpperCase()}
     </Text>
   )
 }
 
 function MetaPill(props: { label: string; value: string; color?: string }) {
   return (
-    <Text backgroundColor={adnifyTheme.backgroundHint}>
-      {' '}
+    <Text>
       <Text color={adnifyTheme.textDim}>{props.label}</Text>
       <Text color={props.color ?? adnifyTheme.textSecondary}>{props.value}</Text>
-      {' '}
     </Text>
   )
 }
 
 export const HeaderBar = memo(function HeaderBar(props: HeaderBarProps) {
+  const { stdout } = useStdout()
+  const compact = (stdout?.columns ?? 100) < 82
   const gitLabel = props.i18n.t(
     props.isGitRepository ? 'header.meta.gitTracked' : 'header.meta.gitDetached',
   )
   const gitColor = props.isGitRepository ? adnifyTheme.success : adnifyTheme.warm
 
   return (
-    <Panel accent={props.busy ? 'brand' : 'muted'}>
+    <Box width="100%" flexDirection="column" paddingX={1}>
       <Box width="100%" justifyContent="space-between" alignItems="flex-start">
         <Box flexDirection="column" flexGrow={1} marginRight={2}>
           <Wordmark
@@ -79,15 +75,19 @@ export const HeaderBar = memo(function HeaderBar(props: HeaderBarProps) {
               variant="dots"
             />
             <MetaPill label={props.i18n.t('header.meta.workspace')} value={props.workspaceName} />
-            {props.packageManager ? (
+            {!compact && props.packageManager ? (
               <MetaPill
                 label={props.i18n.t('header.meta.package')}
                 value={props.packageManager}
                 color={adnifyTheme.brandSoft}
               />
             ) : null}
-            {props.isGitRepository !== undefined ? (
+            {!compact && props.isGitRepository !== undefined ? (
               <MetaPill label={props.i18n.t('header.meta.git')} value={gitLabel} color={gitColor} />
+            ) : null}
+            {!compact ? <Text color={adnifyTheme.borderMuted}>─</Text> : null}
+            {!compact ? (
+              <Text color={adnifyTheme.textDim}>{props.i18n.t('conversation.hintControls')}</Text>
             ) : null}
           </Box>
         </Box>
@@ -99,6 +99,9 @@ export const HeaderBar = memo(function HeaderBar(props: HeaderBarProps) {
           </Text>
         </Box>
       </Box>
-    </Panel>
+      <Text color={props.busy ? adnifyTheme.borderActive : adnifyTheme.borderMuted}>
+        {'─'.repeat(compact ? 28 : 48)}
+      </Text>
+    </Box>
   )
 })

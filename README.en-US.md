@@ -51,10 +51,21 @@ The current repository has implemented or supports the following foundational fe
 - Supports risk grading and interactive approval: Execution pauses and waits for user confirmation before writing files or running verification commands.
 - Supports cross-session workspace memory through `:memory`.
 - Supports Git checkpoints (`:checkpoint` / `:undo`) and file-level restore points (`:restore`).
+- Uses an original terminal otter mascot and river-inspired palette instead of a generic robot mark.
+- Supports a `Ctrl+O` fullscreen transcript: regular conversations collapse verbose tool details, while transcript mode expands the full audit trail.
+- Long conversations support `PgUp / PgDn`; scrolling away pauses follow mode and `Esc` returns to the latest content first.
 - Input interaction has been optimized to match a `cc`-style flow:
   - `Esc` prioritizes aborting execution or closing temporary panels.
   - `Tab / Enter` fills in the command in the command panel first, without direct execution.
   - Supports input history browsing.
+
+## Terminal Interaction
+
+- `Ctrl+O`: Open or close the fullscreen transcript.
+- `PgUp / PgDn`: Scroll long conversations one viewport at a time.
+- `Esc`: Abort active work first, return to the latest content while browsing history, or close transcript mode when already at the bottom.
+- The regular conversation shows compact tool summaries; transcript mode exposes complete inputs, outputs, and elapsed time.
+- Approval and configuration prompts automatically leave transcript mode so required actions remain visible.
 
 ## Tech Stack
 

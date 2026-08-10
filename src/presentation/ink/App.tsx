@@ -1,5 +1,5 @@
 import { Box, Newline, Text, useApp, useInput, useStdout } from 'ink'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AdnifyCliRuntime } from '../../application/dto/AdnifyCliRuntime'
 import { adnifyTheme } from './theme'
 import { ActivityPulse } from './components/ActivityPulse'
@@ -56,9 +56,16 @@ export function App(props: AppProps) {
     Boolean(session) &&
     messages.length === 0 &&
     !controller.streamingText
+  const [isTranscriptView, setIsTranscriptView] = useState(false)
+  useEffect(() => {
+    // 审批与配置向导必须始终可见，不能被全屏记录模式盖住。
+    if (controller.toolApprovalPrompt || controller.configInitPrompt) {
+      setIsTranscriptView(false)
+    }
+  }, [controller.configInitPrompt, controller.toolApprovalPrompt])
   const terminalRows = stdout?.rows ?? 30
-  const viewportChromeRows = 4
-  const headerRows = showEmptyState ? 0 : 7
+  const viewportChromeRows = 1
+  const headerRows = showEmptyState ? 0 : 5
   // 审批面板的高度按实际文本行数算，而不是猜一个常数 ——
   // 预览会折叠到多少行由 useToolApproval 决定，这里写死就会和它对不上，
   // 结果要么把会话区多挤掉几行，要么让面板自己被裁掉。
@@ -74,22 +81,24 @@ export function App(props: AppProps) {
         : controller.isBusy
           ? 7
           : 8
-  const statusRows = controller.isBusy ? 0 : 2
+  const statusRows = 2
   const layoutGapRows = showEmptyState ? 1 : 2
   const safetyRows = 2
   // 会话区吃掉终端剩下的全部高度。
   // 这里曾经有个 Math.min(12, …) 的硬上限，导致 50 行的终端也只给会话区 12 行；
   // 既然现在可以滚动，多出来的高度是实打实能用的，不再设上限。
-  const conversationViewportRows = Math.max(
-    4,
-    terminalRows -
-      headerRows -
-      inputRows -
-      statusRows -
-      layoutGapRows -
-      viewportChromeRows -
-      safetyRows,
-  )
+  const conversationViewportRows = isTranscriptView
+    ? Math.max(4, terminalRows - 2)
+    : Math.max(
+        4,
+        terminalRows -
+          headerRows -
+          inputRows -
+          statusRows -
+          layoutGapRows -
+          viewportChromeRows -
+          safetyRows,
+      )
   const [totalViewportRows, setTotalViewportRows] = useState(0)
   // 按正文高度算滚动上限：顶部那行提示条不显示内容，
   // 用整个视口高度算的话最早一行会永远翻不到。
@@ -102,6 +111,16 @@ export function App(props: AppProps) {
   // 而且审批面板活跃时也应该能翻上去看清究竟要批准什么。
   const handleInput = useCallback(
     (input: string, key: Parameters<typeof controller.handleInput>[1]) => {
+      if (
+        key.ctrl &&
+        input === 'o' &&
+        !controller.toolApprovalPrompt &&
+        !controller.configInitPrompt
+      ) {
+        setIsTranscriptView((current) => !current)
+        return
+      }
+
       if (key.pageUp) {
         // 翻一屏时留一行重叠，避免跨屏的那一行被跳过去。
         scroll.scrollUp(Math.max(1, conversationViewportRows - 1))
@@ -125,13 +144,25 @@ export function App(props: AppProps) {
         return
       }
 
+      if (
+        isTranscriptView &&
+        (key.escape || input.toLowerCase() === 'q') &&
+        !controller.isBusy &&
+        !controller.toolApprovalPrompt
+      ) {
+        setIsTranscriptView(false)
+        return
+      }
+
       controller.handleInput(input, key)
     },
     [
       conversationViewportRows,
       controller.handleInput,
+      controller.configInitPrompt,
       controller.isBusy,
       controller.toolApprovalPrompt,
+      isTranscriptView,
       scroll,
     ],
   )
@@ -196,7 +227,26 @@ export function App(props: AppProps) {
 
   return (
     <Box width="100%" flexDirection="column" paddingX={1}>
-      {showEmptyState ? (
+      {isTranscriptView ? (
+        <>
+          <ConversationViewport
+            messages={messages}
+            streamingText={controller.streamingText}
+            viewportRows={conversationViewportRows}
+            scrollOffset={scroll.offset}
+            onTotalRowsChange={setTotalViewportRows}
+            animateStreamingIndicator={enableFullAnimation}
+            expandedDetails
+            i18n={i18n}
+          />
+          <Box width="100%" justifyContent="space-between" paddingX={1}>
+            <Text color={adnifyTheme.brandSoft} bold>
+              {i18n.t('conversation.transcriptTitle')}
+            </Text>
+            <Text color={adnifyTheme.textDim}>{i18n.t('conversation.transcriptHint')}</Text>
+          </Box>
+        </>
+      ) : showEmptyState ? (
         <EmptyState
           assistantName={readyProfile.name}
           author={readyProfile.author}
@@ -244,28 +294,32 @@ export function App(props: AppProps) {
         </>
       )}
 
-      <Box width="100%" marginTop={1}>
-        <InputDock
-          value={controller.inputValue}
-          busy={controller.isBusy}
-          animateBusyIndicator={enableFullAnimation}
-          mode={controller.session.mode}
-          modelLabel={modelLabel}
-          configInitPrompt={controller.configInitPrompt}
-          toolApprovalPrompt={controller.toolApprovalPrompt}
-          commandSuggestions={controller.commandSuggestions}
-          selectedSuggestionIndex={controller.selectedSuggestionIndex}
-          isSuggestionOpen={controller.isSuggestionOpen}
-          i18n={i18n}
-        />
-      </Box>
+      {!isTranscriptView ? (
+        <>
+          <Box width="100%" marginTop={1}>
+            <InputDock
+              value={controller.inputValue}
+              busy={controller.isBusy}
+              animateBusyIndicator={enableFullAnimation}
+              mode={controller.session.mode}
+              modelLabel={modelLabel}
+              configInitPrompt={controller.configInitPrompt}
+              toolApprovalPrompt={controller.toolApprovalPrompt}
+              commandSuggestions={controller.commandSuggestions}
+              selectedSuggestionIndex={controller.selectedSuggestionIndex}
+              isSuggestionOpen={controller.isSuggestionOpen}
+              i18n={i18n}
+            />
+          </Box>
 
-      <StatusDock
-        statusLine={controller.statusLine}
-        isBusy={controller.isBusy}
-        isConfigured={Boolean(readyModelConfig.apiKey)}
-        i18n={i18n}
-      />
+          <StatusDock
+            statusLine={controller.statusLine}
+            isBusy={controller.isBusy}
+            isConfigured={Boolean(readyModelConfig.apiKey)}
+            i18n={i18n}
+          />
+        </>
+      ) : null}
     </Box>
   )
 }

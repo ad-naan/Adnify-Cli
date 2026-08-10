@@ -5,11 +5,11 @@ import {
   parseCliTranscriptMarkup,
   type CliTranscriptTone,
 } from '../../../application/support/CliTranscriptMarkup'
+import { collapseBlock } from '../../../application/support/CollapsedBlock'
 import type { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import { adnifyTheme } from '../theme'
 import { sliceVisibleRows } from '../hooks/viewportScrollMath'
 import { ActivityPulse } from './ActivityPulse'
-import { Panel } from './Panel'
 
 export interface ConversationViewportProps {
   messages: ConversationMessage[]
@@ -20,6 +20,8 @@ export interface ConversationViewportProps {
   /** 报告内容总行数，让上层知道还能往上翻多少。 */
   onTotalRowsChange?: (totalRows: number) => void
   animateStreamingIndicator?: boolean
+  /** 普通会话压缩工具噪音；全屏记录模式展开完整审计细节。 */
+  expandedDetails?: boolean
   i18n: AppI18n
 }
 
@@ -48,7 +50,7 @@ interface StreamingHeaderViewportRow {
 
 type ViewportRow = TextViewportRow | SpacerViewportRow | StreamingHeaderViewportRow
 
-const PANEL_HORIZONTAL_CHROME = 8
+const PANEL_HORIZONTAL_CHROME = 4
 const MIN_CONTENT_WIDTH = 24
 
 function resolveToneColor(tone: CliTranscriptTone): string {
@@ -189,6 +191,7 @@ function appendMessageRows(
   message: ConversationMessage,
   i18n: AppI18n,
   contentWidth: number,
+  expandedDetails: boolean,
 ) {
   const structured = parseCliTranscriptMarkup(message.content)
 
@@ -206,6 +209,10 @@ function appendMessageRows(
         return
       case 'command-output': {
         const accentColor = resolveToneColor(structured.tone)
+        const isToolOutput = structured.title?.startsWith(`${i18n.t('transcript.tools')} ·`)
+        const content = isToolOutput && !expandedDetails
+          ? collapseBlock(structured.content, 4, i18n, contentWidth).lines.join('\n')
+          : structured.content
 
         appendWrappedRows(rows, {
           keyPrefix: `${message.id}-command-output-title`,
@@ -221,7 +228,7 @@ function appendMessageRows(
           prefixColor: adnifyTheme.borderMuted,
           linePrefix: '│',
           linePrefixColor: adnifyTheme.borderMuted,
-          content: structured.content,
+          content,
           contentColor: adnifyTheme.textSecondary,
           contentWidth,
           indent: 2,
@@ -230,6 +237,10 @@ function appendMessageRows(
       }
       case 'notice': {
         const accentColor = resolveToneColor(structured.tone)
+        const isToolNotice = structured.title?.startsWith(`${i18n.t('transcript.tools')} ·`)
+        const content = isToolNotice && !expandedDetails
+          ? collapseBlock(structured.content, 3, i18n, contentWidth).lines.join('\n')
+          : structured.content
 
         appendWrappedRows(rows, {
           keyPrefix: `${message.id}-notice-title`,
@@ -245,7 +256,7 @@ function appendMessageRows(
           prefixColor: accentColor,
           linePrefix: '│',
           linePrefixColor: accentColor,
-          content: structured.content,
+          content,
           contentColor: adnifyTheme.textMuted,
           contentWidth,
           indent: 2,
@@ -260,7 +271,7 @@ function appendMessageRows(
       rows.push({
         kind: 'text',
         key: `${message.id}-assistant-header`,
-        prefix: 'adnify',
+        prefix: '◉ otter',
         prefixColor: adnifyTheme.brand,
         content: i18n.t('conversation.response'),
         contentColor: adnifyTheme.textDim,
@@ -316,11 +327,12 @@ function buildMessageRows(
   i18n: AppI18n,
   contentWidth: number,
   hasStreaming: boolean,
+  expandedDetails: boolean,
 ): ViewportRow[] {
   const rows: ViewportRow[] = []
 
   messages.forEach((message, index) => {
-    appendMessageRows(rows, message, i18n, contentWidth)
+    appendMessageRows(rows, message, i18n, contentWidth, expandedDetails)
 
     if (index < messages.length - 1 || hasStreaming) {
       rows.push({ kind: 'spacer', key: `${message.id}-spacer` })
@@ -361,7 +373,7 @@ function renderViewportRow(row: ViewportRow, animateStreamingIndicator: boolean)
   if (row.kind === 'streaming-header') {
     return (
       <Box key={row.key} width="100%" gap={1}>
-        <Text color={adnifyTheme.brand} bold>adnify</Text>
+        <Text color={adnifyTheme.brand} bold>◉ otter</Text>
         <ActivityPulse
           active
           animated={animateStreamingIndicator}
@@ -455,8 +467,14 @@ export const ConversationViewport = memo(function ConversationViewport(
     [terminalColumns],
   )
   const messageRows = useMemo(
-    () => buildMessageRows(props.messages, props.i18n, contentWidth, Boolean(props.streamingText)),
-    [contentWidth, props.i18n, props.messages, props.streamingText],
+    () => buildMessageRows(
+      props.messages,
+      props.i18n,
+      contentWidth,
+      Boolean(props.streamingText),
+      Boolean(props.expandedDetails),
+    ),
+    [contentWidth, props.expandedDetails, props.i18n, props.messages, props.streamingText],
   )
   const streamingRows = useMemo(
     () => buildStreamingRows(props.streamingText ?? '', props.i18n, contentWidth),
@@ -498,10 +516,13 @@ export const ConversationViewport = memo(function ConversationViewport(
   const fillerCount = Math.max(0, props.viewportRows - visibleRows.length)
 
   return (
-    <Panel
-      title={props.i18n.t('conversation.panelSession')}
-      accent="muted"
-    >
+    <Box width="100%" flexDirection="column" paddingX={1}>
+      <Box width="100%" justifyContent="space-between">
+        <Text color={adnifyTheme.textDim} bold>{props.i18n.t('conversation.panelSession')}</Text>
+        {terminalColumns >= 60 ? (
+          <Text color={adnifyTheme.textDim}>{props.i18n.t('conversation.hintControls')}</Text>
+        ) : null}
+      </Box>
       <Box height={props.viewportRows} flexDirection="column" overflowY="hidden">
         {visibleRows.map((row) =>
           renderViewportRow(row, Boolean(props.animateStreamingIndicator)),
@@ -510,6 +531,6 @@ export const ConversationViewport = memo(function ConversationViewport(
           <Text key={`viewport-filler-${index}`}>{' '}</Text>
         ))}
       </Box>
-    </Panel>
+    </Box>
   )
 })

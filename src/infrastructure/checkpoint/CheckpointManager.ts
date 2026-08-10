@@ -51,6 +51,8 @@ export class CheckpointManager {
   private static readonly CHECKPOINT_DIR = '.adnify'
 
   private readonly checkpointRoot: string
+  /** 同一毫秒内连续写入时保持严格递增，保证“最新快照”的排序稳定。 */
+  private lastCreatedAt = 0
 
   constructor(
     private readonly workspaceRoot: string,
@@ -195,12 +197,14 @@ export class CheckpointManager {
    * 在工具执行后调用，将所有捕获的条目持久化。
    */
   commitSnapshot(entries: CheckpointEntry[], description: string): string {
-    const id = this.generateId(Date.now())
+    const createdAt = Math.max(Date.now(), this.lastCreatedAt + 1)
+    this.lastCreatedAt = createdAt
+    const id = this.generateId(createdAt)
     const snapshot: CheckpointSnapshot = {
       id,
       description,
       entries,
-      createdAt: Date.now(),
+      createdAt,
     }
 
     this.ensureCheckpointDir()

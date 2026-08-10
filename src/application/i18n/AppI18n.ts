@@ -41,7 +41,7 @@ const messages = {
     'input.labelSetupMode': 'config',
     'input.placeholder': '描述任务，或输入 / 打开命令列表。',
     'input.hintSuggestions': '上下选择  Tab/Enter 填入  Esc 关闭',
-    'input.hintDefault': 'Enter 发送  / 命令  Up/Down 历史',
+    'input.hintDefault': 'Enter 发送  / 命令  Up/Down 历史  Ctrl+O 全屏记录',
     'input.hintConfigInit': 'Enter 继续  Esc 退出配置',
     'input.panelApproval': '审批',
     'input.labelApprovalMode': 'approval',
@@ -74,6 +74,7 @@ const messages = {
     'status.approvalChoiceRequired': '请输入 y 以批准，或输入 n 以拒绝当前工具请求。',
     'status.responseCompleted': '已完成一轮响应。',
     'status.inputIgnored': '输入为空，已忽略。',
+    'status.hintControls': 'Esc 中止 · PgUp/PgDn 滚动 · Ctrl+O 全屏记录',
 
     'conversation.panelSession': '会话',
     'conversation.panelConfiguration': '配置向导',
@@ -83,12 +84,15 @@ const messages = {
     'conversation.localCommand': '本地命令',
     'conversation.thinking': '思考中',
     'conversation.configError': '错误：{message}',
-    'conversation.scrollHidden': '… 上方还有 {count} 行（PgUp/PgDn 滚动，End 回到最新）',
-    'conversation.scrollHiddenOne': '… 上方还有 1 行（PgUp/PgDn 滚动，End 回到最新）',
+    'conversation.scrollHidden': '… 上方还有 {count} 行（PgUp/PgDn 滚动，Esc 回到最新）',
+    'conversation.scrollHiddenOne': '… 上方还有 1 行（PgUp/PgDn 滚动，Esc 回到最新）',
     'conversation.scrollHiddenShort': '… 上方 {count} 行',
-    'conversation.scrollPosition': '… 上方 {above} 行 / 下方 {below} 行（End 回到最新）',
+    'conversation.scrollPosition': '… 上方 {above} 行 / 下方 {below} 行（Esc 回到最新）',
     'conversation.scrollPositionShort': '… ↑{above} ↓{below}',
-    'conversation.scrollTop': '… 已到顶部（End 回到最新）',
+    'conversation.scrollTop': '… 已到顶部（Esc 回到最新）',
+    'conversation.hintControls': 'PgUp/PgDn · Ctrl+O',
+    'conversation.transcriptTitle': '全屏记录',
+    'conversation.transcriptHint': 'PgUp/PgDn 滚动 · Esc 回到底部/退出 · Ctrl+O 退出',
     'collapse.hidden': '… 另有 {count} 行未显示',
     'collapse.hiddenOne': '… 另有 1 行未显示',
     'collapse.hiddenShort': '… 另 {count} 行',
@@ -400,7 +404,7 @@ const messages = {
     'input.labelSetupMode': 'config',
     'input.placeholder': 'Describe the task, or type / to open commands.',
     'input.hintSuggestions': 'Up/Down select  Tab/Enter fill  Esc close',
-    'input.hintDefault': 'Enter send  / commands  Up/Down history',
+    'input.hintDefault': 'Enter send  / commands  Up/Down history  Ctrl+O transcript',
     'input.hintConfigInit': 'Enter continue  Esc exit setup',
     'input.panelApproval': 'Approval',
     'input.labelApprovalMode': 'approval',
@@ -434,6 +438,7 @@ const messages = {
     'status.approvalChoiceRequired': 'Enter y to approve or n to reject the pending tool request.',
     'status.responseCompleted': 'Completed one response.',
     'status.inputIgnored': 'Empty input ignored.',
+    'status.hintControls': 'Esc stop · PgUp/PgDn scroll · Ctrl+O transcript',
 
     'conversation.panelSession': 'Session',
     'conversation.panelConfiguration': 'configuration',
@@ -443,12 +448,15 @@ const messages = {
     'conversation.localCommand': 'local command',
     'conversation.thinking': 'thinking',
     'conversation.configError': 'Error: {message}',
-    'conversation.scrollHidden': '… {count} lines above (PgUp/PgDn to scroll, End for latest)',
-    'conversation.scrollHiddenOne': '… 1 line above (PgUp/PgDn to scroll, End for latest)',
+    'conversation.scrollHidden': '… {count} lines above (PgUp/PgDn to scroll, Esc for latest)',
+    'conversation.scrollHiddenOne': '… 1 line above (PgUp/PgDn to scroll, Esc for latest)',
     'conversation.scrollHiddenShort': '… {count} above',
-    'conversation.scrollPosition': '… {above} above / {below} below (End for latest)',
+    'conversation.scrollPosition': '… {above} above / {below} below (Esc for latest)',
     'conversation.scrollPositionShort': '… ↑{above} ↓{below}',
-    'conversation.scrollTop': '… top reached (End for latest)',
+    'conversation.scrollTop': '… top reached (Esc for latest)',
+    'conversation.hintControls': 'PgUp/PgDn · Ctrl+O',
+    'conversation.transcriptTitle': 'TRANSCRIPT',
+    'conversation.transcriptHint': 'PgUp/PgDn scroll · Esc latest/close · Ctrl+O close',
     'collapse.hidden': '… {count} more lines hidden',
     'collapse.hiddenOne': '… 1 more line hidden',
     'collapse.hiddenShort': '… {count} more',
@@ -769,7 +777,7 @@ export function resolveAppLocale(input?: string | null): AppLocale {
   const normalized = input.toLowerCase()
 
   if (normalized.startsWith('zh')) {
-    return 'en'
+    return 'zh-CN'
   }
 
   if (normalized.startsWith('en')) {

@@ -1,41 +1,42 @@
 export const adnifyTheme = {
   // Surfaces
-  surface: '#1b222c',
-  surfaceSoft: '#252e3b',
-  surfaceActive: '#2f3a4a',
-  backgroundHint: '#2b313d',
+  surface: '#101a1d',
+  surfaceSoft: '#17262a',
+  surfaceActive: '#20363a',
+  backgroundHint: '#1b2c30',
 
   // Borders
-  border: '#4a5568',
-  borderMuted: '#3d4658',
-  borderActive: '#6ec5b4',
-  borderWarm: '#d4a052',
+  border: '#385158',
+  borderMuted: '#293e44',
+  borderActive: '#55d6be',
+  borderWarm: '#d6a76f',
 
   // Text
-  textPrimary: '#f2f6fc',
-  textSecondary: '#ced7e6',
-  textMuted: '#9fadc4',
-  textDim: '#77839a',
+  textPrimary: '#edf7f5',
+  textSecondary: '#c3d8d4',
+  textMuted: '#88a7a4',
+  textDim: '#627f7d',
 
   // Brand palette
-  brand: '#6ec5b4',
-  brandSoft: '#8fdcc9',
-  brandStrong: '#4dab95',
-  brandDim: '#3a8475',
+  brand: '#55d6be',
+  brandSoft: '#8ce8d6',
+  brandStrong: '#2eb69d',
+  brandDim: '#247e70',
 
   // Semantic
-  info: '#7facff',
-  warm: '#ddb068',
-  success: '#8ccb8c',
-  danger: '#e58b8b',
-  user: '#8eb4ff',
-  accent: '#c490e4',
-  accentSoft: '#d9b3ec',
+  info: '#79b8ff',
+  warm: '#dfb477',
+  success: '#8bd49c',
+  danger: '#ef8f8f',
+  user: '#9bc4ff',
+  accent: '#c7a0e8',
+  accentSoft: '#dec2f2',
 
   // Mascot
-  mascotShell: '#8fdcc9',
-  mascotVisor: '#1e2a35',
-  mascotCore: '#5cae9a',
+  mascotFur: '#c58a55',
+  mascotFurSoft: '#e1ad76',
+  mascotMuzzle: '#f1d2a8',
+  mascotWater: '#55d6be',
 
   // Spinner colors for animated states
   spinner1: '#6ec5b4',

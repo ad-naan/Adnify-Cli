@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink'
+import { Box, Text, useStdout } from 'ink'
 import type { SessionListItem } from '../../../application/dto/SessionListItem'
 import type { AppI18n } from '../../../application/i18n/AppI18n'
 import type { AssistantMode } from '../../../domain/assistant/value-objects/AssistantMode'
@@ -35,11 +35,8 @@ function ModeBadge(props: { mode: AssistantMode; busy?: boolean }) {
         : adnifyTheme.success
 
   return (
-    <Text backgroundColor={color} color={adnifyTheme.surface} bold>
-      {' '}
-      {props.mode.toUpperCase()}
-      {props.busy ? ' ●' : ''}
-      {' '}
+    <Text color={color} bold>
+      {props.busy ? '● ' : '◇ '}{props.mode.toUpperCase()}
     </Text>
   )
 }
@@ -65,6 +62,8 @@ function QuickCommandItem(props: { command: string }) {
 }
 
 export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
+  const { stdout } = useStdout()
+  const compact = (stdout?.columns ?? 100) < 88
   const gitLabel = props.i18n.t(
     props.isGitRepository ? 'header.meta.gitTracked' : 'header.meta.gitDetached',
   )
@@ -73,17 +72,13 @@ export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
   return (
     <Box
       width="100%"
-      flexDirection="row"
-      borderStyle="round"
-      borderColor={adnifyTheme.borderActive}
-      paddingX={2}
+      flexDirection="column"
+      paddingX={1}
       paddingY={1}
-      justifyContent="space-between"
     >
-      {/* Left Column: Big Mascot & Brand */}
-      <Box flexDirection="column" flexGrow={1} alignItems="center" justifyContent="center">
+      <Box flexDirection="column" alignItems="center">
         <MascotGlyph active={props.busy} animated={props.animateBrand} large />
-        <Box flexDirection="column" alignItems="center" marginTop={1}>
+        <Box flexDirection="column" alignItems="center">
           <Box gap={1}>
             <Text color={adnifyTheme.brandSoft} bold>
               {props.assistantName}
@@ -99,14 +94,22 @@ export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
         </Box>
       </Box>
 
-      {/* Right Column: Dashboard Info */}
-      <Box width={45} flexDirection="column" flexShrink={0} paddingLeft={3}>
-        <Box justifyContent="space-between" alignItems="center" marginBottom={1}>
-          <Text color={adnifyTheme.textDim}>{props.i18n.t('empty.panelSession')}</Text>
-          <ModeBadge mode={props.mode} busy={props.busy} />
-        </Box>
+      <Box marginTop={1}>
+        <Text color={adnifyTheme.borderMuted}>{'─'.repeat(compact ? 36 : 68)}</Text>
+      </Box>
 
-        <Box flexDirection="column" gap={0} marginBottom={1}>
+      <Box
+        width="100%"
+        flexDirection={compact ? 'column' : 'row'}
+        marginTop={1}
+        gap={compact ? 1 : 4}
+      >
+        <Box flexDirection="column" flexGrow={1}>
+          <Box justifyContent="space-between" alignItems="center" marginBottom={1}>
+            <Text color={adnifyTheme.textDim}>{props.i18n.t('empty.panelSession')}</Text>
+            <ModeBadge mode={props.mode} busy={props.busy} />
+          </Box>
+
           <MetaRow label={props.i18n.t('header.meta.workspace')} value={props.workspaceName} />
           <MetaRow
             label={props.i18n.t('header.meta.package')}
@@ -117,16 +120,13 @@ export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
           <MetaRow label="Model" value={props.modelLabel} color={adnifyTheme.textMuted} />
         </Box>
 
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" flexGrow={1}>
           <Text color={adnifyTheme.brandSoft}>{props.i18n.t('empty.panelQuickStart')}</Text>
-          <Box flexDirection="column" marginTop={1} gap={0}>
-            {props.commands.slice(0, 4).map((command) => (
-              <QuickCommandItem key={command} command={command} />
-            ))}
-          </Box>
-        </Box>
+          {props.commands.slice(0, 4).map((command) => (
+            <QuickCommandItem key={command} command={command} />
+          ))}
 
-        <Box marginTop={1} flexDirection="column">
+          <Box marginTop={1} flexDirection="column">
           <RecentSessionsList
             sessions={props.recentSessions}
             currentSessionId={props.currentSessionId}
@@ -134,7 +134,12 @@ export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
             layout="stack"
             limit={3}
           />
+          </Box>
         </Box>
+      </Box>
+
+      <Box marginTop={1} justifyContent="center">
+        <Text color={adnifyTheme.textDim}>{props.i18n.t('status.hintControls')}</Text>
       </Box>
     </Box>
   )
