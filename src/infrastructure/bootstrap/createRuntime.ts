@@ -26,6 +26,7 @@ import { resolveAppStorage } from '../storage/resolveAppStorage'
 import { CryptoIdGenerator } from '../system/CryptoIdGenerator'
 import { SystemClock } from '../system/SystemClock'
 import { LocalToolExecutor } from '../tooling/LocalToolExecutor'
+import { LocalSubAgentOrchestrator } from '../agent/LocalSubAgentOrchestrator'
 import { CheckpointManager } from '../checkpoint/CheckpointManager'
 import { PendingToolApprovalAdapter } from '../tooling/PendingToolApprovalAdapter'
 import { LocalWorkspaceContextService } from '../workspace/LocalWorkspaceContextService'
@@ -94,7 +95,24 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const checkpointManager = new CheckpointManager(process.cwd(), logger)
 
   // Recreate tool executor with MCP registry support
-  const toolExecutor = new LocalToolExecutor(toolApproval, mcpRegistry, checkpointManager)
+  //
+  // 子代理编排器按需构造：executor 比 gateway 先建好，而 gateway 会随 `:model` 切换被替换，
+  // 所以这里传的是「取当前 gateway」的闭包，而不是某个时刻的实例。
+  const toolExecutor = new LocalToolExecutor(
+    toolApproval,
+    mcpRegistry,
+    checkpointManager,
+    () => {
+      if (!currentGateway) {
+        return undefined
+      }
+
+      return new LocalSubAgentOrchestrator(currentGateway, config.getModelConfig(), {
+        idGenerator,
+        logger,
+      })
+    },
+  )
 
   // Code indexer + repo map builder (shared singletons, reused across model switches)
   const codeIndexer = new TsLanguageServiceIndexer(logger)

@@ -24,6 +24,7 @@ declare module 'bun:test' {
       toBeUndefined: () => void
       toBeTruthy: () => void
       toBeFalsy: () => void
+      toThrow: (expected?: unknown) => void
     }
     rejects: {
       toThrow: (expected?: unknown) => Promise<void>

@@ -435,4 +435,75 @@ describe('LocalToolExecutor approval gate', () => {
 
     expect(approval.asked).toHaveLength(0)
   })
+
+  test('should ask for approval before dispatching sub-agents', async () => {
+    const approval = createApprovalSpy('denied')
+    let ran = false
+    const executor = new LocalToolExecutor(approval.port, undefined, undefined, () => ({
+      createTasks: () => [],
+      runBatch: async (tasks) => {
+        ran = true
+        return tasks
+      },
+    }))
+
+    const result = await executor.execute({
+      toolId: 'task',
+      input: JSON.stringify({ tasks: [{ title: 'Audit logging', instruction: 'x' }] }),
+      workspace: createWorkspace(),
+    })
+
+    // 子代理会真的去打模型 API，所以必须先过审批。
+    expect(approval.asked[0]).toMatchObject({ riskLevel: 'careful' })
+    expect(approval.asked[0]?.preview).toContain('Audit logging')
+    expect(result.ok).toBe(false)
+    // 被拒之后一个子任务都不该跑起来。
+    expect(ran).toBe(false)
+  })
+
+  test('should fail the task tool when no model is configured', async () => {
+    const approval = createApprovalSpy('approved')
+    // 没配 API key 时 resolver 返回 undefined。
+    const executor = new LocalToolExecutor(approval.port, undefined, undefined, () => undefined)
+
+    const result = await executor.execute({
+      toolId: 'task',
+      input: JSON.stringify({ tasks: [{ title: 'Audit logging', instruction: 'x' }] }),
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('no model is configured')
+    // 拿不到编排器就不该弹审批 —— 弹了也只是让用户批准一件做不成的事。
+    expect(approval.asked).toHaveLength(0)
+  })
+
+  test('should not count approval thinking time against the execution timeout', async () => {
+    await withTempWorkspace(async (workspace) => {
+      // 真人在审批面板上斟酌的时间不该算进「工具跑了多久」。
+      // 这里模拟一个慢决定：批准前先拖一会儿，写入仍然必须落盘。
+      const slowApproval: ToolApprovalPort = {
+        async requestApproval() {
+          await new Promise((resolve) => setTimeout(resolve, 120))
+          return 'approved'
+        },
+      }
+      const executor = new LocalToolExecutor(slowApproval)
+
+      const result = await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"write","path":"slow-approval.txt","content":"landed","allowWrite":true}',
+        workspace,
+      })
+
+      expect(result.ok).toBe(true)
+
+      const readBack = await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"read","path":"slow-approval.txt"}',
+        workspace,
+      })
+      expect(readBack.content).toContain('landed')
+    })
+  })
 })

@@ -810,4 +810,61 @@ describe('ModelAssistantResponder native tool calls', () => {
     expect(assistantTurn?.content).toContain('shell-runner')
     expect(replayed[replayed.length - 1]?.content).toContain('no changes')
   })
+
+  test('streams tool progress to the transcript before the final result', async () => {
+    let invocation = 0
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        invocation += 1
+
+        if (invocation === 1) {
+          yield {
+            delta: '',
+            toolCall: {
+              toolCallId: 'call-1',
+              toolName: 'task',
+              input: '{"tasks":[{"title":"Audit logging","instruction":"x"}]}',
+            },
+            usedNativeTools: true,
+          }
+          yield { delta: '', finishReason: 'stop', usedNativeTools: true }
+          return
+        }
+
+        yield { delta: 'Summarised.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+
+    // 一个耗时工具：先推两条进度，再返回结果。
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request): Promise<ToolExecutionResult> {
+        request.onProgress?.({ toolId: request.toolId, message: '▸ started: Audit logging' })
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        request.onProgress?.({ toolId: request.toolId, message: '✓ Audit logging (1/1)', ok: true })
+        return { toolId: request.toolId, ok: true, content: 'found 12 logger calls' }
+      },
+    }
+
+    const transcripts: string[] = []
+    for await (const chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'audit the logging',
+      session: createSession('progress-1'),
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      if (chunk.transcript) {
+        transcripts.push(chunk.transcript)
+      }
+    }
+
+    const startedAt = transcripts.findIndex((entry) => entry.includes('▸ started: Audit logging'))
+    const completedAt = transcripts.findIndex((entry) => entry.includes('✓ Audit logging (1/1)'))
+    const resultAt = transcripts.findIndex((entry) => entry.includes('found 12 logger calls'))
+
+    // 进度必须在结果之前上屏 —— 否则它就不是进度，只是事后总结。
+    expect(startedAt).toBeGreaterThan(-1)
+    expect(completedAt).toBeGreaterThan(startedAt)
+    expect(resultAt).toBeGreaterThan(completedAt)
+  })
 })

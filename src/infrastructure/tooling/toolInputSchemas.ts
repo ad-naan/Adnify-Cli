@@ -138,6 +138,52 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
     required: ['url'],
     additionalProperties: false,
   },
+
+  task: {
+    type: 'object',
+    properties: {
+      tasks: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 8,
+        description:
+          'Subtasks to run in parallel. Each runs in its own isolated context and cannot see this conversation or call tools.',
+        items: {
+          type: 'object',
+          properties: {
+            title: {
+              type: 'string',
+              description: 'Short label for progress display, e.g. "Audit error handling".',
+            },
+            instruction: {
+              type: 'string',
+              description:
+                'The full self-contained task. The sub-agent sees nothing else, so include every fact and code excerpt it needs.',
+            },
+            contextSummary: {
+              type: 'string',
+              description: 'Optional background the sub-agent should assume.',
+            },
+            priority: {
+              type: 'string',
+              enum: ['low', 'normal', 'high'],
+              description: 'Defaults to "normal". Does not affect ordering, only reporting.',
+            },
+          },
+          required: ['title', 'instruction'],
+          additionalProperties: false,
+        },
+      },
+      maxConcurrency: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 4,
+        description: 'How many subtasks run at once. Defaults to 3.',
+      },
+    },
+    required: ['tasks'],
+    additionalProperties: false,
+  },
 }
 
 /** 没有登记 schema 的工具（例如未来新增的）退化成自由 JSON 对象，不至于直接不可用。 */

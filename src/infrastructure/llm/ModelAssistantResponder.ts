@@ -21,6 +21,7 @@ import {
 import { parseToolCallMarkup } from '../../application/support/ToolCallMarkup'
 import { StreamingToolCallParser } from '../../application/support/StreamingToolCallParser'
 import { toModelToolDefinitions } from '../tooling/toolInputSchemas'
+import { ToolProgressChannel } from './ToolProgressChannel'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
@@ -243,11 +244,30 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
         const toolStartTime = Date.now()
 
-        const toolResult = await this.toolExecutor.execute({
-          toolId: toolCall.name,
-          input: toolCall.input,
-          workspace: command.workspace,
-        })
+        // 长工具（子代理批次）在执行途中会推进度。回调里没法 yield，
+        // 所以先进 channel，再由 drain 转成 transcript 事件推上屏。
+        const channel = new ToolProgressChannel((onProgress) =>
+          this.toolExecutor.execute({
+            toolId: toolCall.name,
+            input: toolCall.input,
+            workspace: command.workspace,
+            onProgress,
+          }),
+        )
+
+        for await (const progress of channel.drain()) {
+          yield {
+            kind: 'transcript',
+            delta: '',
+            transcript: createCliNoticeContent(progress.message, {
+              title: `${this.i18n.t('transcript.tools')} · ${progress.toolId}`,
+              tone: progress.ok === false ? 'warning' : 'info',
+            }),
+            done: false,
+          }
+        }
+
+        const toolResult = await channel.result
 
         const toolElapsedMs = Date.now() - toolStartTime
 

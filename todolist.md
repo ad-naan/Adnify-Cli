@@ -60,12 +60,19 @@
 - [x] 新增 git 检查点系统（`:checkpoint` / `:undo`）
 - [x] 新增上下文窗口诊断（`:context`）
 - [x] 系统提示词全面增强
+- [x] 迁移到原生 tool calling（provider function calling），XML 文本解析降级为回退路径
+- [x] 工具输入契约收敛为单一来源（`toolInputSchemas.ts`，JSON Schema）
+- [x] 新增 `task` 工具：并行派发子代理，接入审批与进度回传
+- [x] 文件级检查点（`:restore`），独立于 git 检查点
+- [x] 写入 diff 预览与命令风险展开
+- [x] 工具执行超时改为可暂停的 deadline，审批等待不再计入耗时
 
 ### 待继续
 
 - [ ] 考虑把 `file-ops` 进一步扩展为更结构化的 patch 方案
 - [ ] 继续提升模型选择工具与组合工具的稳定性
-- [ ] 评估是否迁移到更原生的模型工具调用方案（native tool calling）
+- [ ] 子代理目前拿不到工具（结构性限制，避免绕过审批与递归派发）；如需放开要先设计约束
+- [ ] 会话历史仍用 assistant/user 两种角色回填工具调用，尚未引入真正的 tool 角色消息
 - [ ] 补更完整的产品化 README 展示内容与截图
 
 ---
@@ -143,6 +150,57 @@
 ---
 
 ## 最近更新
+
+### 2026-08-10
+
+**原生 tool calling 迁移**
+
+- `ModelStreamChunk` 新增 `toolCall` / `usedNativeTools`，`ModelRequest` 新增 `tools`
+- `AiSdkGateway` 从 `.textStream` 换到 `.fullStream` —— `textStream` 会丢弃所有 tool-call part，
+  只加 `tools` 而不换流会表现为「模型什么都没输出」
+- 工具声明**不带 `execute`**：执行留在 `LocalToolExecutor`，否则 SDK 自动执行会绕过审批面板
+- 回退探测：捕获 4xx `APICallError` 后标记该 provider 不支持原生，重跑一次不带 `tools` 的请求；
+  5xx 不降级（那是服务端故障，改用文本解析只会把问题盖住）。探测结果按 provider+baseUrl+model 缓存
+- `ResponseCache<string>` → `ResponseCache<CachedResponse>`：修掉「命中缓存只重放文本、
+  tool call 被静默丢弃」的 bug，表现为同样的问题第二次问就不执行工具了
+- XML 协议散文改为条件注入：确认原生可用后不再注入，回退模式下仍然注入
+- 新建 `toolInputSchemas.ts`，把散落在系统提示散文和各 handler 解析函数里的输入契约
+  收敛成一份 JSON Schema（schema 以 handler 实际解析逻辑为准，不以散文为准）
+- `StreamingToolCallParser`（11 个测试）与 `ToolCallMarkup`（2 个）全部保留 —— 回退路径仍依赖它们
+
+**`task` 工具（子代理派发）**
+
+- 新增 `prompts/tools/task.md` + `taskHandler.ts`，最多 8 个子任务、并发默认 3（上限 4）
+- 子代理**拿不到任何工具**：`LocalSubAgentOrchestrator` 不持有 `toolExecutor`，
+  `streamChat` 也不传 `tools`。这是结构性限制，不是靠注释约束 —— 否则子代理既能绕过审批，
+  又能递归派发更多子代理
+- 派发前必须审批，预览里列出每个子任务标题；拿不到编排器（没配 API key）时直接失败，
+  不弹审批 —— 弹了也只是让用户批准一件做不成的事
+- 全部子任务失败时返回 `ok: false`，避免模型把一堆错误信息当成调研结论往下走；
+  部分成功仍算成功
+- `createRuntime` 注入的是「取当前 gateway」的闭包而非实例：executor 比 gateway 先构造，
+  且 gateway 会随 `:model` 切换被替换，存实例会让 task 一直用旧模型的网关
+
+**修掉两个超时 bug**
+
+- 工具执行超时（30s）此前把**审批等待也算了进去**：用户在面板上想满 30 秒，
+  一个已经批准的写入就会以超时失败告终。新增 `ToolExecutionDeadline`，
+  `pause()` / `resume()` 让计时只在真正干活时流逝
+- 原先的 `setTimeout` 从不清理，每次工具调用都留一个定时器把事件循环按住；
+  现在 `finally` 里 `dispose()`
+- `task` 预算单独放大到 10 分钟：一次批次要串起若干次完整模型往返，
+  沿用 30s 的话任何真实派发都会在第一个子任务答完前被杀掉（单次请求已由 gateway 的
+  `timeoutMs` 各自兜住，批次不会无限悬着）
+
+**子任务进度上屏**
+
+- `ToolExecutionRequest` 新增可选 `onProgress`；工具执行是「一次调用返回一个结果」的模型，
+  中途没有向界面推送的通道，派 4 个子代理时界面会静默几十秒
+- 新增 `ToolProgressChannel`：回调里没法 yield，所以事件先进队列，
+  `drain()` 一边等执行结束一边把事件吐给 generator。排空队列**先于**判断是否结束 ——
+  反过来会漏掉最后一批事件（最后一个子任务完成与整体完成几乎同时发生）
+
+**当前测试状态：`239 pass / 0 fail`（30 个文件）**
 
 ### 2026-08-03
 
