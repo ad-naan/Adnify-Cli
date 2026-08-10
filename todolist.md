@@ -153,6 +153,15 @@
 
 ### 2026-08-10
 
+**交付收口**
+
+- 修复 Ink 7 `Key` 类型不支持 `home/end` 导致的类型检查失败；保留可用的 PageUp/PageDown 与 Esc 滚动交互
+- 新增 `bun run verify`，统一执行完整测试、TypeScript 类型检查和生产构建
+- 为 `glob-search`、`search-index`、`web-search`、`web-fetch` 补充文件系统与网络边界测试
+- 为 MCP 补充真实 stdio 子进程集成测试，覆盖握手、工具发现、调用、注册中心路由与关闭
+- 同步中英文 README 的工具、命令、存储、Agent 轮次和里程碑描述
+- 当前测试状态：`248 pass / 0 fail`（32 个文件），类型检查与生产构建通过
+
 **原生 tool calling 迁移**
 
 - `ModelStreamChunk` 新增 `toolCall` / `usedNativeTools`，`ModelRequest` 新增 `tools`

@@ -113,17 +113,6 @@ export function App(props: AppProps) {
         return
       }
 
-      // End 直接回到最新，Home 直接跳到最早 —— 长会话里逐屏翻太慢。
-      if (key.end) {
-        scroll.scrollToBottom()
-        return
-      }
-
-      if (key.home && totalViewportRows > conversationViewportRows) {
-        scroll.scrollUp(totalViewportRows)
-        return
-      }
-
       // 翻上去之后 Esc 先用来回到底部 —— 但执行中和审批中不行，
       // 那两种状态下 Esc 是「中止 / 拒绝」，抢走它会让用户没法叫停。
       if (
@@ -144,7 +133,6 @@ export function App(props: AppProps) {
       controller.isBusy,
       controller.toolApprovalPrompt,
       scroll,
-      totalViewportRows,
     ],
   )
 

@@ -45,7 +45,7 @@ Adnify-Cli 想做的不是“一个能聊天的 CLI”，而是“一个真正�
 - 支持运行时切换模型配置。
 - 支持中英双语国际化基础设施。
 - 支持 Prompt Pack 驱动的系统提示词、模式提示词、工具定义和命令定义。
-- 支持工具调用闭环：模型可调用 `workspace-read / search-index / glob-search / file-ops / shell-runner / web-search / web-fetch` 七个工具，工具过程与结果作为过程消息回流到会话区。
+- 支持工具调用闭环：内置 `workspace-read / search-index / glob-search / file-ops / shell-runner / web-search / web-fetch / task` 八个工具，并可动态接入 MCP 工具；工具过程、进度与结果会回流到会话区。
 - 支持风险分级与交互式审批：写文件与执行验证命令前会暂停并等待用户确认。
 - 支持跨会话项目记忆：`:memory <content>` 保存项目知识，后续会话自动注入。
 - 支持 git 检查点：`:checkpoint` 一键提交当前工作状态，`:undo` 撤销最近检查点。
@@ -92,6 +92,12 @@ bun test
 
 ```bash
 bunx tsc --noEmit
+```
+
+提交前一次性验证测试、类型和构建：
+
+```bash
+bun run verify
 ```
 
 ## 配置方式
@@ -165,6 +171,9 @@ Linux：
 
 - `config.json`
 - `sessions/<sessionId>.json`
+- `memories/<workspace>.json`
+
+文件级写入快照存放在工作区的 `.adnify/checkpoints/`，不依赖 Git。
 
 ### 自定义数据目录
 
@@ -214,7 +223,7 @@ Linux：
 
 ## 工具调用与审批
 
-模型可以调用四个工具：
+模型可以调用八个内置工具，以及配置文件中已连接 MCP 服务器暴露的动态工具：
 
 | 工具 | 能力 | 风险 |
 |---|---|---|
@@ -225,6 +234,8 @@ Linux：
 | `shell-runner` | 白名单命令执行 | 只读检索 safe，验证类命令 careful |
 | `web-search` | 基于 DuckDuckGo 的公开网络搜索（无需 API key） | careful |
 | `web-fetch` | 获取并提取 URL 页面的文本内容 | careful |
+| `task` | 并行派发最多 8 个子任务，并将进度回传会话区 | careful |
+| `mcp__<server>__<tool>` | 调用已连接 MCP 服务器提供的工具 | careful |
 
 `shell-runner` 只放行以下命令，其余一律拒绝：
 
@@ -312,19 +323,19 @@ Ink UI、交互控制器、终端布局、输入处理和视图组件。
 
 如果按里程碑粗略划分：
 
-- `M1` 会话持久化与启动恢复：基本完成
-- `M2` 工具调用与 Agent 能力：闭环已跑通，四个工具可执行，agent 循环上限 4 轮
-- `M3` 审批 / 权限 / UI 打磨：风险分级与交互式审批已落地，权限策略与 UI 打磨继续推进
+- `M1` 会话持久化与启动恢复：已完成
+- `M2` 工具调用与 Agent 能力：已完成；支持八个内置工具、动态 MCP 工具和最多 20 轮 Agent 循环
+- `M3` 审批 / 权限 / UI 打磨：核心能力已落地，继续做终端回归与产品化收口
 
 ## 下一阶段重点
 
 接下来更值得继续推进的方向：
 
-- 继续优化会话区、sessions 列表和命令视窗的展示逻辑
-- 扩展权限策略：按路径或命令粒度的持久化允许规则
-- 提高 agent 多轮编排的可观测性（工具耗时、轮次展示）
-- 清理国际化文本编码问题
-- 为后续插件与记忆能力预留扩展点
+- 做一轮真实终端回归，覆盖长会话滚动、审批、中止与恢复
+- 继续优化 sessions 列表和命令视窗的展示逻辑
+- 为 Web、索引、启动恢复和 MCP 补充更多异常路径测试
+- 将工具调用历史升级为真正的 `tool` 角色消息
+- 完善产品截图、配置专题文档与发布流程
 
 ## 项目信息
 

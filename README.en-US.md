@@ -47,8 +47,10 @@ The current repository has implemented or supports the following foundational fe
 - Supports runtime model configuration switching.
 - Supports bilingual (Chinese/English) internationalization infrastructure.
 - Supports Prompt Pack-driven system prompts, mode prompts, tool definitions, and command definitions.
-- Supports a closed-loop tool calling mechanism: The model can invoke four tools (`workspace-read / search-index / file-ops / shell-runner`), and tool processes/results flow back into the session area as process messages.
+- Supports closed-loop tool calling with eight built-in tools (`workspace-read / search-index / glob-search / file-ops / shell-runner / web-search / web-fetch / task`) plus dynamically discovered MCP tools; progress and results flow back into the session area.
 - Supports risk grading and interactive approval: Execution pauses and waits for user confirmation before writing files or running verification commands.
+- Supports cross-session workspace memory through `:memory`.
+- Supports Git checkpoints (`:checkpoint` / `:undo`) and file-level restore points (`:restore`).
 - Input interaction has been optimized to match a `cc`-style flow:
   - `Esc` prioritizes aborting execution or closing temporary panels.
   - `Tab / Enter` fills in the command in the command panel first, without direct execution.
@@ -91,6 +93,12 @@ Type check:
 
 ```bash
 bunx tsc --noEmit
+```
+
+Run tests, type checking, and the production build together before delivery:
+
+```bash
+bun run verify
 ```
 
 ## Configuration Methods
@@ -164,6 +172,9 @@ The data directory currently contains:
 
 - `config.json`
 - `sessions/<sessionId>.json`
+- `memories/<workspace>.json`
+
+File-level write snapshots are stored in `.adnify/checkpoints/` inside the workspace and do not require Git.
 
 ### Custom Data Directory
 
@@ -213,7 +224,11 @@ Currently built-in commands include:
 - `:mode agent`
 - `:mode plan`
 - `:workspace`
+- `:status`
 - `:tools`
+- `:doctor`
+- `:diff`
+- `:review`
 - `:model [provider] [model]`
 - `:config`
 - `:config init`
@@ -225,6 +240,15 @@ Currently built-in commands include:
 - `:session`
 - `:sessions`
 - `:resume [index|id]`
+- `:memory [content]`
+- `:memory list`
+- `:memory clear`
+- `:checkpoint [message]`
+- `:undo`
+- `:restore [id|index]`
+- `:skill [name|list]`
+- `:mcp`
+- `:context`
 - `:storage`
 - `:storage set [path]`
 - `:storage reset`
@@ -233,19 +257,24 @@ Currently built-in commands include:
 
 ## Tool Calling and Approval
 
-The model can invoke four tools:
+The model can invoke eight built-in tools plus tools discovered from configured MCP servers:
 
 | Tool | Capability | Risk |
 |---|---|---|
 | `workspace-read` | Read workspace summary | safe |
 | `search-index` | Code search based on ripgrep (falls back to built-in scanning if rg is unavailable) | safe |
+| `glob-search` | Match workspace files with glob patterns | safe |
 | `file-ops` | `read` / `list` / `write` / `update` / `patch` | Read operations: safe, Write operations: careful |
 | `shell-runner` | Whitelist command execution | Read-only search: safe, Verification commands: careful |
+| `web-search` | Public web search through DuckDuckGo without an API key | careful |
+| `web-fetch` | Fetch and extract text from an HTTP(S) URL | careful |
+| `task` | Dispatch up to eight parallel subtasks and stream their progress | careful |
+| `mcp__<server>__<tool>` | Invoke a tool exposed by a connected MCP server | careful |
 
 `shell-runner` only allows the following commands; all others are rejected:
 
-- No approval required: `rg`, `git status/diff/log/show/branch/rev-parse`
-- Approval required: `bun test`, `bun run build/typecheck/test/lint`, `bunx tsc`
+- No approval required: `rg`, `grep`, `find`, `cat`, `head`, `tail`, `wc`, `sort`, `uniq`, and read-only Git commands.
+- Approval required: project validation commands, package installation, and supported mutating Git commands.
 
 ### Approval Mechanism
 
@@ -328,19 +357,19 @@ The repository includes a `.rules/` directory to constrain collaboration methods
 
 Roughly divided by milestones:
 
-- `M1` Session persistence and startup recovery: Basically complete
-- `M2` Tool calling and Agent capabilities: Closed-loop verified, four tools executable, agent loop limit of 4 rounds
-- `M3` Approval / Permissions / UI polish: Risk grading and interactive approval implemented, permission policies and UI polishing continue
+- `M1` Session persistence and startup recovery: Complete
+- `M2` Tool calling and Agent capabilities: Complete; eight built-in tools, dynamic MCP tools, and an Agent loop limit of 20 rounds
+- `M3` Approval / Permissions / UI polish: Core capabilities are implemented; terminal regression and productization remain in progress
 
 ## Next Phase Priorities
 
 Directions worth continuing to push forward:
 
-- Continue optimizing the display logic for the session area, sessions list, and command window.
-- Expand permission policies: Persistent allow rules at the path or command granularity.
-- Improve observability of multi-turn Agent orchestration (tool execution time, round display).
-- Resolve internationalization text encoding issues.
-- Reserve extension points for future plugins and memory capabilities.
+- Run real-terminal regression checks for long-session scrolling, approval, abort, and resume flows.
+- Continue improving the sessions list and command window.
+- Add more failure-path coverage for Web, indexing, startup recovery, and MCP.
+- Represent tool-call history with native `tool` role messages.
+- Complete product screenshots, configuration documentation, and the release workflow.
 
 ## Project Information
 

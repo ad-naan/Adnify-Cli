@@ -15,6 +15,7 @@
     "build": "bun build ./src/main.tsx --outfile ./dist/adnify-cli.js --target bun",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test",
+    "verify": "bun test && bun run typecheck && bun run build",
     "check": "bun test src/domain/session/aggregates/ConversationSession.test.ts"
   },
   "dependencies": {
