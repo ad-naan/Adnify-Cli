@@ -33,6 +33,7 @@ export interface CliControllerState {
   bootstrap: BootstrapSnapshot | null
   session: ConversationSession | null
   inputValue: string
+  inputCursor: number
   statusLine: string
   streamingText: string
   streamingMessages: ConversationMessage[]
@@ -45,6 +46,7 @@ export interface CliControllerState {
   isSuggestionOpen: boolean
   recentSessions: SessionListItem[]
   handleInput: (input: string, key: Key) => void
+  handlePaste: (text: string) => void
 }
 
 const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
@@ -103,6 +105,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const [bootstrap, setBootstrap] = useState<BootstrapSnapshot | null>(null)
   const [session, setSession] = useState<ConversationSession | null>(null)
   const [inputValue, setInputValue] = useState('')
+  const [inputCursor, setInputCursor] = useState(0)
   const [statusLine, setStatusLine] = useState(i18n.t('status.initializing'))
   const [streamingText, setStreamingText] = useState('')
   const [streamingMessages, setStreamingMessages] = useState<ConversationMessage[]>([])
@@ -306,7 +309,9 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       return false
     }
 
-    setInputValue(`${next.command} `)
+    const nextValue = `${next.command} `
+    setInputValue(nextValue)
+    setInputCursor(Array.from(nextValue).length)
     setSelectedSuggestionIndex(0)
     setIsSuggestionDismissed(false)
     setHistoryIndex(null)
@@ -334,6 +339,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     setHistoryIndex(null)
     if (restoreDraft) {
       setInputValue(draftInputRef.current)
+      setInputCursor(Array.from(draftInputRef.current).length)
     }
     draftInputRef.current = ''
   }, [])
@@ -353,6 +359,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         const nextIndex = inputHistory.length - 1
         setHistoryIndex(nextIndex)
         setInputValue(inputHistory[nextIndex] ?? '')
+        setInputCursor(Array.from(inputHistory[nextIndex] ?? '').length)
         return true
       }
 
@@ -360,6 +367,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         const nextIndex = Math.max(0, historyIndex - 1)
         setHistoryIndex(nextIndex)
         setInputValue(inputHistory[nextIndex] ?? '')
+        setInputCursor(Array.from(inputHistory[nextIndex] ?? '').length)
         return true
       }
 
@@ -371,6 +379,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       const nextIndex = historyIndex + 1
       setHistoryIndex(nextIndex)
       setInputValue(inputHistory[nextIndex] ?? '')
+      setInputCursor(Array.from(inputHistory[nextIndex] ?? '').length)
       return true
     },
     [exitHistoryNavigation, historyIndex, inputHistory, inputValue],
@@ -391,6 +400,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       busyRef.current = true
       setIsBusy(true)
       setInputValue('')
+      setInputCursor(0)
 
       try {
         const result = await configInit.handleInput(nextInput)
@@ -417,6 +427,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     busyRef.current = true
     setIsBusy(true)
     setInputValue('')
+    setInputCursor(0)
     setSelectedSuggestionIndex(0)
     setIsSuggestionDismissed(false)
     setHistoryIndex(null)
@@ -575,6 +586,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
 
       if (inputValue) {
         setInputValue('')
+        setInputCursor(0)
         setSelectedSuggestionIndex(0)
       }
       return
@@ -649,13 +661,42 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       return
     }
 
+    const inputCharacters = Array.from(inputValue)
+
+    if (key.leftArrow) {
+      setInputCursor((previous) => Math.max(0, previous - 1))
+      return
+    }
+
+    if (key.rightArrow) {
+      setInputCursor((previous) => Math.min(inputCharacters.length, previous + 1))
+      return
+    }
+
+    if (key.home) {
+      setInputCursor(0)
+      return
+    }
+
+    if (key.end) {
+      setInputCursor(inputCharacters.length)
+      return
+    }
+
     if (key.backspace || key.delete) {
       if (historyIndex !== null) {
         setHistoryIndex(null)
         draftInputRef.current = ''
       }
       setIsSuggestionDismissed(false)
-      setInputValue((previous) => previous.slice(0, -1))
+      if (key.backspace && inputCursor > 0) {
+        inputCharacters.splice(inputCursor - 1, 1)
+        setInputValue(inputCharacters.join(''))
+        setInputCursor(inputCursor - 1)
+      } else if (key.delete && inputCursor < inputCharacters.length) {
+        inputCharacters.splice(inputCursor, 1)
+        setInputValue(inputCharacters.join(''))
+      }
       setSelectedSuggestionIndex(0)
       return
     }
@@ -669,7 +710,10 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         draftInputRef.current = ''
       }
       setIsSuggestionDismissed(false)
-      setInputValue((previous) => previous + input)
+      const insertedCharacters = Array.from(input)
+      inputCharacters.splice(inputCursor, 0, ...insertedCharacters)
+      setInputValue(inputCharacters.join(''))
+      setInputCursor(inputCursor + insertedCharacters.length)
       setSelectedSuggestionIndex(0)
     }
   }, [
@@ -680,6 +724,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     historyIndex,
     i18n,
     inputValue,
+    inputCursor,
     isSuggestionOpen,
     navigateHistory,
     params,
@@ -688,10 +733,25 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     session,
   ])
 
+  const handlePaste = useCallback((text: string) => {
+    if (busyRef.current || toolApproval.isActive || !text) {
+      return
+    }
+
+    const inputCharacters = Array.from(inputValue)
+    const insertedCharacters = Array.from(text.replace(/\r\n/g, '\n'))
+    inputCharacters.splice(inputCursor, 0, ...insertedCharacters)
+    setInputValue(inputCharacters.join(''))
+    setInputCursor(inputCursor + insertedCharacters.length)
+    setHistoryIndex(null)
+    setIsSuggestionDismissed(false)
+  }, [inputCursor, inputValue, toolApproval.isActive])
+
   return {
     bootstrap,
     session,
     inputValue,
+    inputCursor,
     statusLine,
     streamingText,
     streamingMessages,
@@ -714,5 +774,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     isSuggestionOpen,
     recentSessions,
     handleInput,
+    handlePaste,
   }
 }

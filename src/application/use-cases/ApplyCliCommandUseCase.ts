@@ -748,11 +748,6 @@ export class ApplyCliCommandUseCase {
 
       case 'clear': {
         session.clearConversation(now)
-        addCommandInput()
-        addCommandOutput(this.i18n.t('cli.clear.output'), {
-          title: this.i18n.t('transcript.conversation'),
-          tone: 'success',
-        })
         return persist(this.i18n.t('cli.clear.status'))
       }
 

@@ -6,11 +6,11 @@ import { adnifyTheme } from '../theme'
 import { ActivityPulse } from './ActivityPulse'
 import type { CommandSuggestionItem } from './CommandSuggestionList'
 import { CommandSuggestionList } from './CommandSuggestionList'
-import { InputCursor } from './InputCursor'
-import { Panel } from './Panel'
+import { NativeInputLine } from './NativeInputLine'
 
 export interface InputDockProps {
   value: string
+  cursor: number
   busy: boolean
   animateBusyIndicator?: boolean
   mode: AssistantMode
@@ -69,71 +69,39 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
   const isConfigActive = Boolean(props.configInitPrompt)
   const approvalPromptLines = props.toolApprovalPrompt?.split('\n') ?? []
   const configPromptLines = props.configInitPrompt?.split('\n') ?? []
-  const panelSubtitle = props.isSuggestionOpen
-    ? `${props.commandSuggestions.length} commands`
-    : props.modelLabel
-
   return (
-    <Panel
-      title={
-        isApprovalActive
-          ? props.i18n.t('approval.panelTitle')
-          : isConfigActive
-            ? props.i18n.t('input.panelSetup')
-            : props.isSuggestionOpen
-              ? props.i18n.t('input.panelCommands')
-              : props.i18n.t('input.panelConsole')
-      }
-      subtitle={panelSubtitle}
-      accent={isApprovalActive ? 'warm' : props.busy ? 'brand' : 'muted'}
+    <Box
+      width="100%"
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={isApprovalActive ? adnifyTheme.borderWarm : props.busy ? adnifyTheme.borderActive : adnifyTheme.borderMuted}
+      paddingX={1}
     >
-      <Box width="100%" justifyContent="space-between" alignItems="center">
-        <Box gap={1} alignItems="center">
-          <ActivityPulse
-            active={props.busy}
-            animated={Boolean(props.busy && props.animateBusyIndicator)}
-            color={props.busy ? adnifyTheme.brandSoft : adnifyTheme.textDim}
-            idleFrame="·  "
-            variant="dots"
-          />
-          <Text color={adnifyTheme.textDim}>{props.i18n.t('input.labelInput')}</Text>
-        </Box>
-
-        <Box gap={1}>
-          <Text color={adnifyTheme.textDim}>
-            {isConfigActive ? props.i18n.t('input.labelSetupMode') : props.mode}
-          </Text>
-          {props.isSuggestionOpen ? (
-            <Text color={adnifyTheme.brand}>{props.i18n.t('input.labelPalette')}</Text>
-          ) : null}
-        </Box>
-      </Box>
-
       {isApprovalActive ? (
         <PromptBlock lines={approvalPromptLines} tone="approval" keyPrefix="approval-prompt" />
       ) : isConfigActive ? (
         <PromptBlock lines={configPromptLines} tone="config" keyPrefix="config-prompt" />
       ) : null}
 
-      <Box marginTop={1} paddingX={1}>
-        <Box gap={1}>
-          <Text color={props.busy ? adnifyTheme.brandSoft : adnifyTheme.success} bold>
-            {props.busy ? '⠋' : '❯'}
-          </Text>
-          {props.value ? (
-            <Box>
-              <Text color={adnifyTheme.textPrimary}>{props.value}</Text>
-              <InputCursor visible={!props.busy} busy={props.busy} />
-            </Box>
-          ) : props.busy ? (
-            <Text color={adnifyTheme.textDim}>{' '}</Text>
-          ) : (
-            <Box>
-              <Text color={adnifyTheme.textDim}>{props.i18n.t('input.placeholder')}</Text>
-              <InputCursor visible busy={props.busy} />
-            </Box>
-          )}
-        </Box>
+      <Box width="100%" gap={1} alignItems="center">
+        <Text color={props.busy ? adnifyTheme.brandSoft : adnifyTheme.success} bold>
+          {props.busy ? '◉' : '❯'}
+        </Text>
+        <NativeInputLine
+          value={props.value}
+          cursor={props.cursor}
+          placeholder={props.i18n.t('input.placeholder')}
+          active={!props.busy && !isApprovalActive}
+        />
+        {props.busy ? (
+          <ActivityPulse
+            active
+            animated={Boolean(props.animateBusyIndicator)}
+            color={adnifyTheme.brandSoft}
+            idleFrame="·"
+            variant="dots"
+          />
+        ) : null}
       </Box>
 
       {props.isSuggestionOpen ? (
@@ -142,7 +110,7 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
             items={props.commandSuggestions}
             selectedIndex={props.selectedSuggestionIndex}
           />
-          <Box marginTop={1} justifyContent="space-between">
+          <Box justifyContent="space-between">
             <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintSuggestions')}</Text>
             <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintDefault')}</Text>
           </Box>
@@ -151,9 +119,7 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
         <Text color={adnifyTheme.warm}>{props.i18n.t('approval.instruction')}</Text>
       ) : isConfigActive ? (
         <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintConfigInit')}</Text>
-      ) : !props.busy ? (
-        <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintDefault')}</Text>
       ) : null}
-    </Panel>
+    </Box>
   )
 })

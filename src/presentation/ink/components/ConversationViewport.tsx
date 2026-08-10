@@ -8,6 +8,7 @@ import {
 import { collapseBlock } from '../../../application/support/CollapsedBlock'
 import type { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import { adnifyTheme } from '../theme'
+import { terminalCharacterWidth, terminalTextWidth } from '../terminalText'
 import { sliceVisibleRows } from '../hooks/viewportScrollMath'
 import { ActivityPulse } from './ActivityPulse'
 
@@ -22,6 +23,8 @@ export interface ConversationViewportProps {
   animateStreamingIndicator?: boolean
   /** 普通会话压缩工具噪音；全屏记录模式展开完整审计细节。 */
   expandedDetails?: boolean
+  /** Full transcript mode keeps the title and controls; normal mode stays visually quiet. */
+  showChrome?: boolean
   i18n: AppI18n
 }
 
@@ -68,48 +71,6 @@ function resolveToneColor(tone: CliTranscriptTone): string {
   }
 }
 
-function getCharacterWidth(character: string): number {
-  if (character === '\t') {
-    return 2
-  }
-
-  const codePoint = character.codePointAt(0)
-  if (!codePoint) {
-    return 1
-  }
-
-  if (
-    codePoint >= 0x1100 &&
-    (codePoint <= 0x115f ||
-      codePoint === 0x2329 ||
-      codePoint === 0x232a ||
-      (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f) ||
-      (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
-      (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
-      (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
-      (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
-      (codePoint >= 0xff00 && codePoint <= 0xff60) ||
-      (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
-      (codePoint >= 0x1f300 && codePoint <= 0x1f64f) ||
-      (codePoint >= 0x1f900 && codePoint <= 0x1f9ff) ||
-      (codePoint >= 0x20000 && codePoint <= 0x3fffd))
-  ) {
-    return 2
-  }
-
-  return 1
-}
-
-function getDisplayWidth(content: string): number {
-  let width = 0
-
-  for (const character of content) {
-    width += getCharacterWidth(character)
-  }
-
-  return width
-}
-
 function wrapContent(content: string, maxWidth: number): string[] {
   // 按终端显示宽度折行，尽量减少中英文混排时的高度跳动。
   const wrappedLines: string[] = []
@@ -127,7 +88,7 @@ function wrapContent(content: string, maxWidth: number): string[] {
     let currentWidth = 0
 
     for (const character of normalizedLine) {
-      const characterWidth = getCharacterWidth(character)
+      const characterWidth = terminalCharacterWidth(character)
 
       if (currentLine && currentWidth + characterWidth > maxWidth) {
         wrappedLines.push(currentLine)
@@ -161,8 +122,8 @@ function appendWrappedRows(
   },
 ) {
   const baseIndent = options.indent ?? 0
-  const prefixPadding = options.prefix ? getDisplayWidth(options.prefix) + 1 : 0
-  const linePrefixPadding = options.linePrefix ? getDisplayWidth(options.linePrefix) + 1 : 0
+  const prefixPadding = options.prefix ? terminalTextWidth(options.prefix) + 1 : 0
+  const linePrefixPadding = options.linePrefix ? terminalTextWidth(options.linePrefix) + 1 : 0
   
   // Use the maximum padding required by either the first line prefix or subsequent line prefixes
   const maxPrefixPadding = Math.max(prefixPadding, linePrefixPadding)
@@ -513,23 +474,25 @@ export const ConversationViewport = memo(function ConversationViewport(
       ...body,
     ]
   }, [contentWidth, props.i18n, props.viewportRows, scrollOffset, viewportRows])
-  const fillerCount = Math.max(0, props.viewportRows - visibleRows.length)
-
   return (
     <Box width="100%" flexDirection="column" paddingX={1}>
-      <Box width="100%" justifyContent="space-between">
-        <Text color={adnifyTheme.textDim} bold>{props.i18n.t('conversation.panelSession')}</Text>
-        {terminalColumns >= 60 ? (
-          <Text color={adnifyTheme.textDim}>{props.i18n.t('conversation.hintControls')}</Text>
-        ) : null}
-      </Box>
-      <Box height={props.viewportRows} flexDirection="column" overflowY="hidden">
+      {props.showChrome ? (
+        <Box width="100%" justifyContent="space-between">
+          <Text color={adnifyTheme.textDim} bold>{props.i18n.t('conversation.panelSession')}</Text>
+          {terminalColumns >= 60 ? (
+            <Text color={adnifyTheme.textDim}>{props.i18n.t('conversation.hintControls')}</Text>
+          ) : null}
+        </Box>
+      ) : null}
+      <Box
+        height={props.viewportRows}
+        flexDirection="column"
+        overflowY="hidden"
+        justifyContent="flex-start"
+      >
         {visibleRows.map((row) =>
           renderViewportRow(row, Boolean(props.animateStreamingIndicator)),
         )}
-        {Array.from({ length: fillerCount }, (_, index) => (
-          <Text key={`viewport-filler-${index}`}>{' '}</Text>
-        ))}
       </Box>
     </Box>
   )

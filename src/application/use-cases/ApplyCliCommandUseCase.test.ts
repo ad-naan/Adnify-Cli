@@ -292,7 +292,7 @@ describe('ApplyCliCommandUseCase', () => {
     expect(output?.content).toContain('Shell Runner [careful]')
   })
 
-  test('should clear existing conversation before appending clear transcript', async () => {
+  test('should leave the conversation empty after clear', async () => {
     const repo = createMockSessionRepo()
     const session = ConversationSession.create({
       id: 'sess-clear',
@@ -326,11 +326,8 @@ describe('ApplyCliCommandUseCase', () => {
     })
 
     const messages = result.session.getMessages()
-    expect(messages).toHaveLength(2)
-    expect(parseCliTranscriptMarkup(messages[0]?.content ?? '')).toEqual({
-      kind: 'command-input',
-      content: '/clear',
-    })
+    expect(messages).toHaveLength(0)
+    expect(result.statusLine).toBeTruthy()
   })
 
   test('should list recent sessions for the current workspace', async () => {
