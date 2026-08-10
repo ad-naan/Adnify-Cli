@@ -535,3 +535,279 @@ describe('ModelAssistantResponder', () => {
     expect(transcripts[1]).toContain('clean tree')
   })
 })
+
+/**
+ * 原生 function calling 路径。
+ * 上面那批 fake 全靠 yield 字面 XML 驱动，覆盖的是 provider 不支持 tools 时的回退路径；
+ * 这里的 fake 只 yield {toolCall}，正文为空 —— 这才是原生通道的真实形态。
+ */
+describe('ModelAssistantResponder native tool calls', () => {
+  const PROMPT_SET: AssistantPromptSet = {
+    core: 'core system',
+    modes: { chat: 'chat instructions', agent: 'agent instructions', plan: 'plan instructions' },
+  }
+
+  const MODEL_CONFIG: ModelConfig = {
+    provider: 'openai-compatible',
+    apiKey: 'x',
+    baseUrl: 'https://example.com',
+    model: 'test-model',
+    maxTokens: 1000,
+    temperature: 0,
+    timeoutMs: 1000,
+  }
+
+  const CATALOG = [
+    new ToolDescriptor({
+      id: 'shell-runner',
+      name: 'Shell Runner',
+      description: 'Run terminal commands',
+      category: 'terminal',
+      riskLevel: 'dangerous',
+    }),
+  ]
+
+  function createSession(id: string): ConversationSession {
+    return ConversationSession.create({
+      id,
+      title: 'test',
+      mode: 'agent',
+      workspacePath: '/workspace',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+  }
+
+  function createWorkspace(): WorkspaceContext {
+    return new WorkspaceContext({
+      rootPath: '/workspace',
+      isGitRepository: true,
+      packageManager: 'bun',
+      topLevelEntries: ['src', 'package.json'],
+    })
+  }
+
+  function createResponder(
+    gateway: ModelGatewayPort,
+    toolExecutor: ToolExecutorPort,
+  ): ModelAssistantResponder {
+    return new ModelAssistantResponder(
+      gateway,
+      MODEL_CONFIG,
+      createMockConfig(PROMPT_SET),
+      toolExecutor,
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+  }
+
+  test('executes a tool call delivered through the native channel with no visible text', async () => {
+    let invocation = 0
+    const executedCalls: ToolExecutionRequest[] = []
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        invocation += 1
+
+        if (invocation === 1) {
+          // 原生调用的典型形态：delta 为空，工具调用走结构化字段。
+          yield {
+            delta: '',
+            toolCall: {
+              toolCallId: 'call-1',
+              toolName: 'shell-runner',
+              input: '{"argv":["git","status"]}',
+            },
+            usedNativeTools: true,
+          }
+          yield { delta: '', finishReason: 'stop', usedNativeTools: true }
+          return
+        }
+
+        yield { delta: 'Repository state reviewed.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request): Promise<ToolExecutionResult> {
+        executedCalls.push(request)
+        return { toolId: request.toolId, ok: true, content: 'clean tree' }
+      },
+    }
+
+    const chunks: string[] = []
+    for await (const chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'inspect the repository state',
+      session: createSession('native-1'),
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      chunks.push(chunk.delta)
+    }
+
+    expect(executedCalls).toHaveLength(1)
+    expect(executedCalls[0]?.toolId).toBe('shell-runner')
+    expect(executedCalls[0]?.input).toBe('{"argv":["git","status"]}')
+    // 结构化调用不该有任何 XML 漏进可见正文。
+    expect(chunks.join('')).toBe('Repository state reviewed.')
+  })
+
+  test('sends tool definitions with real JSON Schema to the gateway', async () => {
+    let capturedRequest: ModelRequest | null = null
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
+        capturedRequest = request
+        yield { delta: 'done', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+
+    for await (const _chunk of createResponder(gateway, createMockToolExecutor()).streamReply({
+      prompt: 'hello',
+      session: createSession('native-2'),
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      // consume
+    }
+
+    const request = capturedRequest as unknown as ModelRequest
+    expect(request.tools).toHaveLength(1)
+    const shell = request.tools?.[0]
+    // name 必须是 id（shell-runner），不是展示名（Shell Runner）——
+    // executor 是按 id 查表的，传展示名会导致工具找不到。
+    expect(shell?.name).toBe('shell-runner')
+    expect(shell?.inputSchema.required).toEqual(['argv'])
+  })
+
+  test('drops the XML protocol prose on the next turn once native tools are confirmed', async () => {
+    const capturedRequests: ModelRequest[] = []
+    let invocation = 0
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
+        capturedRequests.push(request)
+        invocation += 1
+
+        if (invocation === 1) {
+          yield {
+            delta: '',
+            toolCall: { toolCallId: 'c1', toolName: 'shell-runner', input: '{"argv":["git","log"]}' },
+            usedNativeTools: true,
+          }
+          return
+        }
+
+        yield { delta: 'Done.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+
+    const toolExecutor: ToolExecutorPort = {
+      async execute(): Promise<ToolExecutionResult> {
+        return { toolId: 'shell-runner', ok: true, content: 'log output' }
+      },
+    }
+
+    const responder = createResponder(gateway, toolExecutor)
+    const workspace = createWorkspace()
+
+    for await (const _chunk of responder.streamReply({
+      prompt: 'read the log',
+      session: createSession('native-3'),
+      workspace,
+      toolCatalog: CATALOG,
+    })) {
+      // consume
+    }
+
+    // 第一轮还没有观察结果，保守地注入散文。
+    expect(capturedRequests[0]?.messages[0]?.content).toContain('adnify_tool_call')
+    // 工具目录本身在两种模式下都要保留。
+    expect(capturedRequests[0]?.messages[0]?.content).toContain('Shell Runner [terminal]')
+
+    // 系统提示每次 streamReply 只构建一次，所以生效点是下一次用户发言，
+    // 而不是同一次调用的第二轮 —— 中途换系统提示会让 prompt 缓存全部失效。
+    const before = capturedRequests.length
+    for await (const _chunk of responder.streamReply({
+      prompt: 'and now the diff',
+      session: createSession('native-3b'),
+      workspace,
+      toolCatalog: CATALOG,
+    })) {
+      // consume
+    }
+
+    const nextTurn = capturedRequests[before]
+    expect(nextTurn?.messages[0]?.content).not.toContain('adnify_tool_call')
+    expect(nextTurn?.messages[0]?.content).toContain('Shell Runner [terminal]')
+  })
+
+  test('keeps the XML protocol prose when the gateway reports no native tools', async () => {
+    let capturedRequest: ModelRequest | null = null
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
+        capturedRequest = request
+        yield { delta: 'plain answer', finishReason: 'stop', usedNativeTools: false }
+      },
+    }
+
+    for await (const _chunk of createResponder(gateway, createMockToolExecutor()).streamReply({
+      prompt: 'hello',
+      session: createSession('native-4'),
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      // consume
+    }
+
+    const request = capturedRequest as unknown as ModelRequest
+    expect(request.messages[0]?.content).toContain('adnify_tool_call')
+  })
+
+  test('records what the model called so history has no empty assistant turn', async () => {
+    const capturedRequests: ModelRequest[] = []
+    let invocation = 0
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
+        capturedRequests.push(request)
+        invocation += 1
+
+        if (invocation === 1) {
+          yield {
+            delta: '',
+            toolCall: { toolCallId: 'c1', toolName: 'shell-runner', input: '{"argv":["git","diff"]}' },
+            usedNativeTools: true,
+          }
+          return
+        }
+
+        yield { delta: 'Reviewed.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+
+    const toolExecutor: ToolExecutorPort = {
+      async execute(): Promise<ToolExecutionResult> {
+        return { toolId: 'shell-runner', ok: true, content: 'no changes' }
+      },
+    }
+
+    for await (const _chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'check the diff',
+      session: createSession('native-5'),
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      // consume
+    }
+
+    const second = capturedRequests[1]
+    expect(second).not.toBeUndefined()
+    const replayed = second?.messages ?? []
+    const assistantTurn = replayed[replayed.length - 2]
+    // 原生模式下模型可能只发工具调用、没有正文。空 content 会让部分 provider 直接 400。
+    expect(assistantTurn?.role).toBe('assistant')
+    expect(assistantTurn?.content).toContain('shell-runner')
+    expect(replayed[replayed.length - 1]?.content).toContain('no changes')
+  })
+})

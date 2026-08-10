@@ -20,6 +20,7 @@ import {
 } from '../../application/support/CliTranscriptMarkup'
 import { parseToolCallMarkup } from '../../application/support/ToolCallMarkup'
 import { StreamingToolCallParser } from '../../application/support/StreamingToolCallParser'
+import { toModelToolDefinitions } from '../tooling/toolInputSchemas'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
@@ -27,6 +28,14 @@ import type { HookPort } from '../../application/ports/HookPort'
 
 export class ModelAssistantResponder implements AssistantResponderPort {
   private readonly maxAgentTurns = 20
+
+  /**
+   * 该 gateway 是否真的走通了原生 function calling。
+   * null 表示还没观察到 —— 此时按最保守的方式处理：仍然注入 XML 协议散文。
+   * 一旦确认原生可用就不再注入，避免模型在两套协议之间摇摆。
+   * gateway 换了（updateGateway）就要重新观察。
+   */
+  private nativeToolsSupported: boolean | null = null
 
   constructor(
     private gateway: ModelGatewayPort,
@@ -45,6 +54,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
   updateGateway(gateway: ModelGatewayPort, config: ModelConfig): void {
     this.gateway = gateway
     this.config = config
+    // 换了 provider/endpoint，原生工具的结论不再适用。
+    this.nativeToolsSupported = null
   }
 
   /**
@@ -122,11 +133,14 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           }
         }
 
-        // Stream text in real-time with streaming tool-call detection.
-        // The parser holds back partial tag prefixes and suppresses tool-call XML
-        // from being emitted as visible text. Normal prose streams immediately.
+        // 两条工具通道：
+        //  1. 原生 function calling —— chunk.toolCall 直接给出结构化调用；
+        //  2. 文本回退 —— provider 不支持 tools 时，模型输出 XML，由 StreamingToolCallParser 抠出来。
+        // 文本解析器无条件喂入：它同时负责把 XML 从可见正文里挡掉。原生模式下模型不会
+        // 输出那个标签，解析器就是个透传。
         const streamParser = new StreamingToolCallParser()
         let accumulated = ''
+        let nativeToolCall: { name: string; input: string } | null = null
 
         for await (const chunk of this.gateway.streamChat({
           messages: activeMessages,
@@ -134,7 +148,17 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           temperature: this.config.temperature,
           maxTokens: this.config.maxTokens,
           abortSignal: command.abortSignal,
+          tools: toModelToolDefinitions(command.toolCatalog),
         })) {
+          if (chunk.usedNativeTools !== undefined) {
+            this.nativeToolsSupported = chunk.usedNativeTools
+          }
+
+          if (chunk.toolCall && !nativeToolCall) {
+            // 一轮只执行一个工具调用 —— 与审批流程和回填顺序保持一致。
+            nativeToolCall = { name: chunk.toolCall.toolName, input: chunk.toolCall.input }
+          }
+
           accumulated += chunk.delta
           const parsed = streamParser.push(chunk.delta)
           if (parsed.text) {
@@ -160,7 +184,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           })
         }
 
-        const toolCall = flushResult.toolCall ?? parseToolCallMarkup(responseText)
+        // 原生调用优先。回退路径里 parseToolCallMarkup 兜住 streamParser 没识别的形态
+        // （例如模型在标签前后多说了话，导致解析器没进入 tool-call 模式）。
+        const toolCall =
+          nativeToolCall ?? flushResult.toolCall ?? parseToolCallMarkup(responseText)
 
         if (!toolCall) {
           yield { kind: 'text', delta: '', done: true }
@@ -273,9 +300,19 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           done: false,
         }
 
+        // 回填这一轮的上下文。
+        // 原生模式下 responseText 经常是空的（模型只发了工具调用，没有正文），
+        // 直接塞进去会产生一条空的 assistant 消息 —— 部分 provider 会因此报 400。
+        // 所以补一行说明它调用了什么，而不是像回退模式那样把 XML 原样存回去。
+        const assistantContent = nativeToolCall
+          ? [responseText, `[called ${toolCall.name} with ${toolCall.input}]`]
+              .filter(Boolean)
+              .join('\n\n')
+          : responseText
+
         activeMessages = [
           ...activeMessages,
-          { role: 'assistant', content: responseText },
+          { role: 'assistant', content: assistantContent },
           {
             role: 'user',
             content: [
@@ -283,7 +320,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
               toolResult.ok ? 'status: ok' : 'status: failed',
               toolResult.content,
               '',
-              'Continue the task. If another tool is required, emit one tool call only.',
+              'Continue the task. If another tool is required, request one tool call only.',
             ].join('\n'),
           },
         ]
@@ -323,6 +360,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       command.memoryBlock,
       skillListing,
       repoMapBlock,
+      // 还没确认原生可用时也注入 —— 第一轮宁可多给一段散文，也不能让工具完全不可用。
+      this.nativeToolsSupported !== true,
     )
 
     const messages: ModelMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -350,6 +389,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     memoryBlock?: string,
     skillListing?: string,
     repoMapBlock?: string,
+    includeTextToolProtocol = true,
   ): string {
     const modePrompt = promptSet.modes[session.mode]
     const toolBlock =
@@ -400,17 +440,27 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       '## Available Tool Definitions',
       toolBlock,
       '',
-      '## Tool Calling Protocol',
-      `When you need a tool, respond with exactly one ${'<adnify_tool_call name="tool-id">...</adnify_tool_call>'} block and nothing else.`,
-      'The inner content must be valid JSON.',
-      'For file-ops, use JSON like {"action":"read","path":"src/main.tsx"}, {"action":"list","path":"src"}, {"action":"write","path":"src/example.ts","content":"...","allowWrite":true}, or {"action":"update","path":"src/example.ts","oldText":"before","newText":"after","allowWrite":true}.',
-      'For search-index, use JSON like {"query":"useState","limit":10}.',
-      'For glob-search, use JSON like {"pattern":"src/**/*.ts"} or {"patterns":["*.test.ts","*.spec.ts"]}.',
-      'For shell-runner, use JSON like {"argv":["rg","query","src"]}.',
-      'For web-search, use JSON like {"query":"React 19 features","limit":5}.',
-      'For web-fetch, use JSON like {"url":"https://docs.example.com/api"}.',
-      'For workspace-read, use JSON like {} or {"focus":"package.json"}.',
-      '',
+    )
+
+    // 原生 function calling 已经把参数契约交给模型了（见 toolInputSchemas.ts）。
+    // 这时再注入一遍 XML 协议只会让模型在两种调用方式之间摇摆，反而更容易出错。
+    if (includeTextToolProtocol) {
+      promptParts.push(
+        '## Tool Calling Protocol',
+        `When you need a tool, respond with exactly one ${'<adnify_tool_call name="tool-id">...</adnify_tool_call>'} block and nothing else.`,
+        'The inner content must be valid JSON.',
+        'For file-ops, use JSON like {"action":"read","path":"src/main.tsx"}, {"action":"list","path":"src"}, {"action":"write","path":"src/example.ts","content":"...","allowWrite":true}, or {"action":"update","path":"src/example.ts","oldText":"before","newText":"after","allowWrite":true}.',
+        'For search-index, use JSON like {"query":"useState","limit":10}.',
+        'For glob-search, use JSON like {"pattern":"src/**/*.ts"} or {"patterns":["*.test.ts","*.spec.ts"]}.',
+        'For shell-runner, use JSON like {"argv":["rg","query","src"]}.',
+        'For web-search, use JSON like {"query":"React 19 features","limit":5}.',
+        'For web-fetch, use JSON like {"url":"https://docs.example.com/api"}.',
+        'For workspace-read, use JSON like {} or {"focus":"package.json"}.',
+        '',
+      )
+    }
+
+    promptParts.push(
       '## Shell Command Whitelist',
       'Safe (no approval): rg, grep, find, cat, head, tail, wc, sort, uniq, git status/diff/log/show/branch/rev-parse/remote/tag/ls-files/blame/shortlog/describe.',
       'Careful (approval required): bun test/run/x, npm/pnpm/yarn run <script>/install/ci, npx tsc/eslint/prettier/vitest/jest, tsc.',

@@ -9,6 +9,7 @@ declare module 'bun:test' {
     toContain: (expected: unknown) => void
     toHaveLength: (expected: number) => void
     toBeNull: () => void
+    toBeDefined: () => void
     toBeUndefined: () => void
     toBeTruthy: () => void
     toBeFalsy: () => void
