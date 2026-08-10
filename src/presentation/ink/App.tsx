@@ -17,6 +17,14 @@ export interface AppProps {
   cwd: string
 }
 
+/**
+ * 审批面板里除提示文本之外固定占掉的行数。
+ *
+ * 数出来的：Panel 边框 2 + 标签行 1 + PromptBlock 上边距 1 + 它自己的边框 2
+ * + 输入行含上边距 2 + 底部按键说明 1 = 9。
+ */
+const APPROVAL_CHROME_ROWS = 9
+
 export function App(props: AppProps) {
   const { exit } = useApp()
   const { stdout } = useStdout()
@@ -51,10 +59,16 @@ export function App(props: AppProps) {
   const terminalRows = stdout?.rows ?? 30
   const viewportChromeRows = 4
   const headerRows = showEmptyState ? 0 : 7
+  // 审批面板的高度按实际文本行数算，而不是猜一个常数 ——
+  // 预览会折叠到多少行由 useToolApproval 决定，这里写死就会和它对不上，
+  // 结果要么把会话区多挤掉几行，要么让面板自己被裁掉。
+  const approvalRows = controller.toolApprovalPrompt
+    ? controller.toolApprovalPrompt.split('\n').length + APPROVAL_CHROME_ROWS
+    : 0
   const inputRows = controller.configInitPrompt
     ? 14
-    : controller.toolApprovalPrompt
-      ? 12
+    : approvalRows > 0
+      ? approvalRows
       : controller.isSuggestionOpen
         ? 12
         : controller.isBusy

@@ -89,6 +89,10 @@ const messages = {
     'conversation.scrollPosition': '… 上方 {above} 行 / 下方 {below} 行（End 回到最新）',
     'conversation.scrollPositionShort': '… ↑{above} ↓{below}',
     'conversation.scrollTop': '… 已到顶部（End 回到最新）',
+    'collapse.hidden': '… 另有 {count} 行未显示',
+    'collapse.hiddenOne': '… 另有 1 行未显示',
+    'collapse.hiddenShort': '… 另 {count} 行',
+    'cli.output.omittedChars': '…… 内容过长，省略 {count} 个字符 ……',
 
     'transcript.commands': '命令',
     'transcript.mode': '模式',
@@ -445,6 +449,10 @@ const messages = {
     'conversation.scrollPosition': '… {above} above / {below} below (End for latest)',
     'conversation.scrollPositionShort': '… ↑{above} ↓{below}',
     'conversation.scrollTop': '… top reached (End for latest)',
+    'collapse.hidden': '… {count} more lines hidden',
+    'collapse.hiddenOne': '… 1 more line hidden',
+    'collapse.hiddenShort': '… {count} more',
+    'cli.output.omittedChars': '... content too long, {count} characters omitted ...',
 
     'transcript.commands': 'commands',
     'transcript.mode': 'mode',

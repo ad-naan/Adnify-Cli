@@ -15,6 +15,7 @@ import { isApprovedDecision } from '../../domain/tooling/value-objects/ToolAppro
 import { autoApproveToolApproval } from './PendingToolApprovalAdapter'
 import { parseFileOpsRequest, runFileOps, type FileOpsRequest } from './handlers/fileOpsHandler'
 import { handleSearchIndex } from './handlers/searchIndexHandler'
+import { formatShellCommandEffect } from './classifyShellCommand'
 import { parseShellRunnerRequest, runShellCommand } from './handlers/shellRunnerHandler'
 import { toolFailure } from './handlers/ToolHandler'
 import { replaceFirst } from './toolPathGuard'
@@ -141,8 +142,15 @@ export class LocalToolExecutor implements ToolExecutorPort {
       return parsed.result
     }
 
-    const { riskLevel, summary } = parsed.value.classification
-    const denial = await this.ensureApproved({ toolId: request.toolId, riskLevel, summary })
+    const { riskLevel, summary, effect } = parsed.value.classification
+    const denial = await this.ensureApproved({
+      toolId: request.toolId,
+      riskLevel,
+      summary,
+      // 命令风险展开：光一个 careful 标签说明不了批准之后会发生什么，
+      // `git add` 和 `git reset --hard` 在面板上长得一模一样。
+      preview: formatShellCommandEffect(effect),
+    })
 
     return denial ?? runShellCommand(parsed.value)
   }
@@ -172,14 +180,14 @@ function toRelativePath(rootPath: string, resolvedPath: string): string {
   return relative(rootPath, resolvedPath) || '.'
 }
 
-/** 预览最多展示的行数，避免大文件把审批面板刷爆。 */
-const MAX_PREVIEW_LINES = 40
-
 /**
  * 为待批准的写入构造 diff 预览。
  *
  * 这里算的是「还没落盘的改动」—— git diff 此刻看不到任何东西，
  * 所以必须自己把新旧内容对比出来。
+ *
+ * 返回完整 diff，不在这一层截断：终端有多高只有 presentation 知道，
+ * 在基础设施层写死行数，换个窗口大小就是错的。折叠交给审批面板做。
  *
  * 任何失败都退化为「没有预览」，绝不因为预览算不出来就挡住写入。
  */
@@ -225,13 +233,8 @@ async function buildFileOpsPreview(
     }
 
     const body = formatDiffAsText(ops, targetPath)
-    const lines = body.split('\n')
-    const shown =
-      lines.length > MAX_PREVIEW_LINES
-        ? [...lines.slice(0, MAX_PREVIEW_LINES), `... ${lines.length - MAX_PREVIEW_LINES} more line(s)`]
-        : lines
 
-    return [...shown, `+${stats.additions} -${stats.deletions}`].join('\n')
+    return [body, `+${stats.additions} -${stats.deletions}`].join('\n')
   } catch {
     return undefined
   }

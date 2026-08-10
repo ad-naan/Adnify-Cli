@@ -8,3 +8,4 @@ dist
 cc
 .adnify
 .tmp
+.tmp*/

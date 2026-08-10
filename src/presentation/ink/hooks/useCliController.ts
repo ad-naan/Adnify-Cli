@@ -1,4 +1,4 @@
-import type { Key } from 'ink'
+import { useStdout, type Key } from 'ink'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BootstrapSnapshot } from '../../../application/dto/BootstrapSnapshot'
 import type { SessionListItem } from '../../../application/dto/SessionListItem'
@@ -15,6 +15,19 @@ export interface UseCliControllerParams {
   cwd: string
   onExit: () => void
 }
+
+/**
+ * 审批预览能占的行数。
+ *
+ * 审批面板本身要占掉边框、摘要、按键说明等固定行，剩下的才留给 diff。
+ * 矮终端下宁可只显示几行 + 「另有 N 行未显示」，也不能把输入框顶出屏幕。
+ */
+function approvalPreviewRows(terminalRows: number): number {
+  return Math.max(1, terminalRows - APPROVAL_RESERVED_ROWS)
+}
+
+/** 审批面板中不属于预览的固定开销：面板 chrome + 会话区最小高度。 */
+const APPROVAL_RESERVED_ROWS = 16
 
 export interface CliControllerState {
   bootstrap: BootstrapSnapshot | null
@@ -108,8 +121,15 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const streamingBufferRef = useRef('')
   const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const memoryStoreRef = useRef<MemoryStore | null>(null)
+  const { stdout } = useStdout()
   const configInit = useConfigInit(i18n)
-  const toolApproval = useToolApproval(params.runtime.toolApproval, i18n)
+  // 预览高度直接由终端高度推出，不经过 App 的 inputRows ——
+  // inputRows 本身是从审批文本行数算出来的，若再反过来决定预览高度就成了循环。
+  const toolApproval = useToolApproval(
+    params.runtime.toolApproval,
+    i18n,
+    approvalPreviewRows(stdout?.rows ?? 30),
+  )
 
   const flushStreamingBuffer = useCallback(() => {
     if (streamingFlushTimerRef.current) {

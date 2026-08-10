@@ -488,12 +488,18 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     return paths
   }
 
+  /**
+   * 面向模型的转录压缩：控制上下文占用，与终端高度无关，所以按字符算。
+   * 标注省略量，让模型知道自己看到的不是全部。
+   */
   private truncateForTranscript(content: string, maxLength: number): string {
     const normalized = content.trim()
     if (normalized.length <= maxLength) {
       return normalized
     }
 
-    return `${normalized.slice(0, maxLength)}\n\n[truncated]`
+    const omitted = normalized.length - maxLength
+
+    return `${normalized.slice(0, maxLength)}\n\n[truncated: ${omitted} of ${normalized.length} characters omitted]`
   }
 }

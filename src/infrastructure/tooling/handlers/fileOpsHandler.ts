@@ -70,10 +70,15 @@ async function readFileAction(input: FileOpsRequest): Promise<ToolExecutionResul
       return toolFailure(request.toolId, 'The requested path is not a file.')
     }
 
+    // 面向模型的截断：保护上下文窗口，与终端高度无关，因此按字符算。
+    // 必须说明省了多少 —— 否则模型无从判断自己看到的是全文还是一角，
+    // 会拿残缺内容当完整内容用。
     const content = await readFile(resolvedPath, 'utf8')
     const truncated =
       content.length > MAX_FILE_READ_CHARS
-        ? `${content.slice(0, MAX_FILE_READ_CHARS)}\n\n[truncated]`
+        ? `${content.slice(0, MAX_FILE_READ_CHARS)}\n\n[truncated: ${
+            content.length - MAX_FILE_READ_CHARS
+          } of ${content.length} characters omitted]`
         : content
 
     return toolSuccess(

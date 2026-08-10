@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppI18n } from '../../../application/i18n/AppI18n'
+import { collapseBlockToFit } from '../../../application/support/CollapsedBlock'
 import type { ToolApprovalController } from '../../../application/ports/ToolApprovalPort'
 import type {
   ToolActionIntent,
@@ -23,6 +24,7 @@ export interface ToolApprovalState {
 export function useToolApproval(
   controller: ToolApprovalController | null,
   i18n: AppI18n,
+  previewRows = PREVIEW_LINE_CAP,
 ): ToolApprovalState {
   const [pending, setPending] = useState<ToolActionIntent | null>(null)
   const [errorText, setErrorText] = useState('')
@@ -67,7 +69,7 @@ export function useToolApproval(
 
   return {
     isActive: pending !== null,
-    promptText: pending ? buildPromptText(pending, i18n) : '',
+    promptText: pending ? buildPromptText(pending, i18n, previewRows) : '',
     errorText,
     handleInput,
     denyAll,
@@ -87,7 +89,14 @@ function parseDecision(input: string): ToolApprovalDecision | null {
   }
 }
 
-function buildPromptText(intent: ToolActionIntent, i18n: AppI18n): string {
+/** 预览最多占的行数上限；终端更矮时按实际可用高度让步。 */
+const PREVIEW_LINE_CAP = 16
+
+function buildPromptText(
+  intent: ToolActionIntent,
+  i18n: AppI18n,
+  previewRows: number,
+): string {
   const lines = [
     i18n.t('approval.title', { tool: intent.toolId }),
     `  ${intent.summary}`,
@@ -99,9 +108,12 @@ function buildPromptText(intent: ToolActionIntent, i18n: AppI18n): string {
   }
 
   // 写入类操作附带改动预览 —— 改动还没落盘，这是用户批准前唯一能看到它的地方。
+  // 预览可能很长，按可用高度折叠；折叠时必须显示藏了多少行，
+  // 否则用户会以为「就改了这么点」而批准一个实际大得多的写入。
   if (intent.preview) {
+    const collapsed = collapseBlockToFit(intent.preview, previewRows, PREVIEW_LINE_CAP, i18n)
     lines.push('')
-    lines.push(...intent.preview.split('\n').map((line) => `  ${line}`))
+    lines.push(...collapsed.lines.map((line) => `  ${line}`))
   }
 
   // 按键说明由 InputDock 单独渲染在面板底部，这里不再重复。

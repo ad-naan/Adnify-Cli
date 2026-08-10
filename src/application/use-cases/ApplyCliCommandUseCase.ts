@@ -390,7 +390,7 @@ export class ApplyCliCommandUseCase {
 
           addCommandOutput(
             trimmedPatch
-              ? [this.i18n.t('cli.diff.title'), '', trimLargeBlock(trimmedPatch)].join('\n')
+              ? [this.i18n.t('cli.diff.title'), '', trimLargeBlock(trimmedPatch, this.i18n)].join('\n')
               : [this.i18n.t('cli.diff.title'), '', this.i18n.t('cli.diff.noChanges')].join('\n'),
             {
               title: this.i18n.t('transcript.command'),
@@ -1136,12 +1136,21 @@ function formatToolLine(tool: ToolDescriptor, i18n: AppI18n): string {
   return `- ${localizeToolName(tool, i18n)} ${formatToolRiskBadge(tool, i18n)}: ${localizeToolDescription(tool, i18n)}`
 }
 
-function trimLargeBlock(content: string, maxLength = 12_000): string {
+/**
+ * 超大块内容的兜底截断。
+ *
+ * 输出进的是会话区，而会话区现在可以滚动，所以不需要为「屏幕放不下」而截断 ——
+ * 用户翻得到。这里只防病理情况（几十万行的 diff 会拖垮渲染），
+ * 因此阈值放得很宽，并且必须说清楚省掉了多少，不能只留一句「truncated」。
+ */
+function trimLargeBlock(content: string, i18n: AppI18n, maxLength = 200_000): string {
   if (content.length <= maxLength) {
     return content
   }
 
-  return `${content.slice(0, maxLength)}\n\n... diff truncated ...`
+  const omitted = content.length - maxLength
+
+  return `${content.slice(0, maxLength)}\n\n${i18n.t('cli.output.omittedChars', { count: omitted })}`
 }
 
 function formatToolCatalog(tools: ToolDescriptor[], i18n: AppI18n): string[] {

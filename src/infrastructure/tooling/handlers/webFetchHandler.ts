@@ -51,7 +51,10 @@ export const handleWebFetch: ToolHandler = async (request) => {
     }
 
     if (text.length > MAX_FETCH_CHARS) {
-      text = `${text.slice(0, MAX_FETCH_CHARS)}\n\n[... truncated, ${body.length - MAX_FETCH_CHARS} chars omitted]`
+      // 用 text.length 而不是 body.length：HTML 被 stripHtml 处理过之后，
+      // body 是原始长度，拿它算省略量会算出一个和实际截断无关的数字。
+      const omitted = text.length - MAX_FETCH_CHARS
+      text = `${text.slice(0, MAX_FETCH_CHARS)}\n\n[truncated: ${omitted} of ${text.length} characters omitted]`
     }
 
     const meta = [
