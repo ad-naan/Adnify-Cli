@@ -2,17 +2,37 @@
 
 # 🦦 Adnify-Cli
 
-**Command AI Into Real Work.**
+**Your terminal. Your model. Your code.**
 
-A branded AI coding terminal built for real-world engineering delivery.
+An AI coding companion that runs in your terminal — not a chat box ported to the terminal, but a real agent that reads your code, writes your files, and runs your commands, with every step waiting for your approval.
 
-Built on `Bun + TypeScript + Ink`. Not a web chat ported into the terminal, but a stable, clear, and sustainably evolving engineering workspace that integrates sessions, commands, configuration, recovery, persistence, and Agent capabilities.
+Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic, Google, Ollama, DeepSeek, or any OpenAI-compatible endpoint — no vendor lock-in.
 
-[Quick Start](#-quick-start) · [Features](#-features) · [Tools & Approval](#️-tools--approval) · [Configuration](#-configuration) · [Architecture](#-architecture)
+[Quick Start](#-quick-start) · [Why Adnify-Cli](#-why-adnify-cli) · [Tools & Approval](#️-tools--approval) · [Configuration](#-configuration) · [Architecture](#-architecture)
 
-<img src="assets/main.png" alt="Adnify-Cli Terminal Interface" width="100%" />
+<img src="assets/main.png" alt="Adnify-Cli Terminal Interface (Light)" width="100%" />
+
+<br/>
+
+<img src="assets/main-dark.png" alt="Adnify-Cli Terminal Interface (Dark)" width="100%" />
 
 </div>
+
+---
+
+## 🔑 Why Adnify-Cli
+
+| What you care about | How Adnify-Cli handles it |
+|---|---|
+| **Privacy** | Runs locally. Your API key and session data stay on your disk — no intermediate servers, no telemetry |
+| **No lock-in** | OpenAI, Anthropic, Google, Ollama, DeepSeek, Yi… anything with an OpenAI-compatible API works |
+| **Don't touch my code** | Every file write and command execution triggers an approval panel — press `y` to proceed, `n` to reject |
+| **Undo mistakes** | `:undo` rolls back instantly with Git-independent file-level snapshots — works even without a repo |
+| **Stop re-explaining everything** | `:memory` persists project conventions and decisions across sessions, auto-injected next time |
+| **Don't silently burn tokens** | `:context` shows real-time message count, token estimates, and health status |
+| **Need more tools** | 8 built-in tools + MCP protocol support — connect your own tool servers for unlimited extensibility |
+| **Want custom prompts** | All system prompts, tool definitions, and commands are Markdown files in `prompts/` — edit and customize |
+| **Non-English experience** | Bilingual UI (Chinese/English), `Ctrl+O` fullscreen audit trail, `PgUp/PgDn` scrolling |
 
 ---
 
@@ -23,21 +43,22 @@ Built on `Bun + TypeScript + Ink`. Not a web chat ported into the terminal, but 
 | Mode | Description |
 |---|---|
 | **Chat** | Everyday Q&A and code discussion |
-| **Agent** | Multi-turn tool calling with automatic file I/O, command execution, and code search |
+| **Agent** | Multi-turn tool calling with automatic file I/O, command execution, and code search — up to 20 autonomous rounds |
 | **Plan** | Plan first, execute later — ideal for complex tasks |
 
 ### Core Capabilities
 
 - **Streaming Responses** — Real-time output with stable, low-jitter terminal rendering
-- **Session Persistence** — Per-workspace session files, auto-restore on startup
-- **Closed-Loop Tool Calling** — 8 built-in tools + dynamic MCP tools, with progress and results flowing back into the session
-- **Risk-Tiered Approval** — Pauses before file writes and command execution for user confirmation
+- **Session Persistence** — Per-workspace session files, auto-restore on startup — never lose context when closing the terminal
+- **Closed-Loop Tool Calling** — 8 built-in tools + dynamic MCP tools, with progress and results streaming back in real time
+- **Risk-Tiered Approval** — Pauses before file writes and command execution — the model doesn't decide, you do
 - **Cross-Session Memory** — `:memory` stores project knowledge, auto-injected into future sessions
 - **Checkpoints & Undo** — `:checkpoint` / `:undo` / `:restore` with Git-independent file-level snapshots
 - **Context Window Diagnostics** — `:context` for real-time message count, token estimation, and health
 - **Bilingual i18n** — Switch between Chinese and English interface
-- **Prompt Pack Driven** — System prompts, tool definitions, and command definitions are maintainable and replaceable
-- **Original Otter Branding** — Deep river theme palette with a unique mascot identity
+- **Prompt Pack** — All system prompts, tool definitions, and commands live in `prompts/` as editable Markdown
+- **Native Tool Calling** — Uses provider-native function calling first, falls back to text parsing automatically
+- **Fullscreen Audit Trail** — `Ctrl+O` expands complete tool inputs, outputs, and elapsed time; regular view stays clean
 
 ---
 
@@ -137,6 +158,8 @@ bun run verify
 
 ## 💾 Data Storage
 
+**All data lives only on your local disk** — sessions, config, memory. No cloud sync, no telemetry.
+
 ### Default Paths
 
 | Platform | Path |
@@ -159,6 +182,8 @@ Adnify-Cli/
 File-level write snapshots are stored in `.adnify/checkpoints/` within the workspace and do not require Git.
 
 ### Custom Data Directory
+
+Don't want it on your C drive? Move it anywhere:
 
 ```
 :storage              # View current data directory
@@ -275,8 +300,6 @@ The repository includes a `.rules/` directory to constrain collaboration methods
 ---
 
 <div align="center">
-
-**Adnify-Cli** — Like a product, not just a script. Like a workspace, not just a Q&A window.
 
 Made with 🦦 by **adnaan**
 
