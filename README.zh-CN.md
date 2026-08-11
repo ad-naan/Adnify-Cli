@@ -12,8 +12,8 @@
 
 [快速开始](#-快速开始) · [为什么选 Adnify-Cli](#-为什么选-adnify-cli) · [工具与审批](#️-工具与审批) · [配置](#-配置) · [架构](#-架构)
 
-<img src="assets/main.png#gh-light-mode-only" alt="Adnify-Cli 终端界面" width="100%" />
-<img src="assets/main-dark.png#gh-dark-mode-only" alt="Adnify-Cli 终端界面" width="100%" />
+<img src="https://raw.githubusercontent.com/ad-naan/Adnify-Cli/main/assets/main.png#gh-light-mode-only" alt="Adnify-Cli 终端界面" width="100%" />
+<img src="https://raw.githubusercontent.com/ad-naan/Adnify-Cli/main/assets/main-dark.png#gh-dark-mode-only" alt="Adnify-Cli 终端界面" width="100%" />
 
 </div>
 
@@ -106,6 +106,23 @@
 ---
 
 ## ⚡ 快速开始
+
+### 安装
+
+```bash
+# 通过 npm 全局安装
+npm install -g adnify-cli
+
+# 或通过 bun 全局安装
+bun install -g adnify-cli
+
+# 运行
+adnify
+```
+
+> **需要 [Bun](https://bun.sh) 运行时。** 如果还没装，`adnify` 会提示你先安装。
+
+### 开发
 
 ```bash
 # 安装依赖

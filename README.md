@@ -12,8 +12,8 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 
 [Quick Start](#-quick-start) · [Why Adnify-Cli](#-why-adnify-cli) · [Tools & Approval](#️-tools--approval) · [Configuration](#-configuration) · [Architecture](#-architecture)
 
-<img src="assets/main.png#gh-light-mode-only" alt="Adnify-Cli Terminal Interface" width="100%" />
-<img src="assets/main-dark.png#gh-dark-mode-only" alt="Adnify-Cli Terminal Interface" width="100%" />
+<img src="https://raw.githubusercontent.com/ad-naan/Adnify-Cli/main/assets/main.png#gh-light-mode-only" alt="Adnify-Cli Terminal Interface" width="100%" />
+<img src="https://raw.githubusercontent.com/ad-naan/Adnify-Cli/main/assets/main-dark.png#gh-dark-mode-only" alt="Adnify-Cli Terminal Interface" width="100%" />
 
 </div>
 
@@ -106,6 +106,23 @@ File writes and verification commands are not decided by the model alone. Execut
 ---
 
 ## ⚡ Quick Start
+
+### Install
+
+```bash
+# Install globally via npm
+npm install -g adnify-cli
+
+# Or install via bun
+bun install -g adnify-cli
+
+# Run
+adnify
+```
+
+> **Requires [Bun](https://bun.sh) runtime.** If you don't have it yet, `adnify` will prompt you to install it.
+
+### Development
 
 ```bash
 # Install dependencies
