@@ -2,145 +2,144 @@
 
 # 🦦 Adnify-Cli
 
-**你的终端。你的模型。你的代码。**
+**Your terminal. Your model. Your code.**
 
-一个跑在终端里的 AI 编程搭档——不是聊天框搬进终端，而是真正能读你的代码、改你的文件、跑你的命令，同时每一步都等你点头。
+An AI coding companion that runs in your terminal — not a chat box ported to the terminal, but a real agent that reads your code, writes your files, and runs your commands, with every step waiting for your approval.
 
-本地运行，数据不出你的机器。支持 OpenAI / Anthropic / Google / 任意 OpenAI 兼容接口，不绑定任何平台。
+Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic, Google, Ollama, DeepSeek, or any OpenAI-compatible endpoint — no vendor lock-in.
 
-[快速开始](#-快速开始) · [为什么选 Adnify-Cli](#-为什么选-adnify-cli) · [工具与审批](#️-工具与审批) · [配置](#-配置) · [架构](#-架构)
+[📚 中文文档](./README.zh-CN.md)
 
-<img src="assets/main.png" alt="Adnify-Cli 终端界面（浅色）" width="100%" />
+[Quick Start](#-quick-start) · [Why Adnify-Cli](#-why-adnify-cli) · [Tools & Approval](#️-tools--approval) · [Configuration](#-configuration) · [Architecture](#-architecture)
 
-<br/>
-
-<img src="assets/main-dark.png" alt="Adnify-Cli 终端界面（深色）" width="100%" />
+<img src="assets/main.png#gh-light-mode-only" alt="Adnify-Cli Terminal Interface" width="100%" />
+<img src="assets/main-dark.png#gh-dark-mode-only" alt="Adnify-Cli Terminal Interface" width="100%" />
 
 </div>
 
 ---
 
-## 🔑 为什么选 Adnify-Cli
+## 🔑 Why Adnify-Cli
 
-| 你关心的 | Adnify-Cli 怎么做 |
+| What you care about | How Adnify-Cli handles it |
 |---|---|
-| **隐私** | 本地运行，API Key 和会话数据只存在你的磁盘上，不经过任何中间服务器 |
-| **不绑定平台** | OpenAI、Anthropic、Google、Ollama、DeepSeek、零一万物……只要是 OpenAI 兼容接口就能接 |
-| **AI 别乱动我代码** | 每次写文件、跑命令前都会弹出审批面板，你按 `y` 才落盘，按 `n` 直接拒绝 |
-| **改坏了能撤销** | `:undo` 一键回滚，文件级快照不依赖 Git——就算没仓库也能恢复 |
-| **别每次从头解释项目** | `:memory` 跨会话记住项目约定、架构决策、踩过的坑，下次自动带上 |
-| **token 别偷偷用完** | `:context` 实时显示消息数、token 估算和健康度，上下文快炸了会告诉你 |
-| **工具不够用** | 内置 8 个工具 + MCP 协议支持，接你自己的工具服务器无限扩展 |
-| **提示词想自己改** | 所有系统提示词、工具定义都是 `prompts/` 目录下的 Markdown，改文件就能定制 |
-| **中文体验** | 中英双语界面，`Ctrl+O` 全屏审计记录，`PgUp/PgDn` 滚动长会话 |
+| **Privacy** | Runs locally. Your API key and session data stay on your disk — no intermediate servers, no telemetry |
+| **No lock-in** | OpenAI, Anthropic, Google, Ollama, DeepSeek, Yi… anything with an OpenAI-compatible API works |
+| **Don't touch my code** | Every file write and command execution triggers an approval panel — press `y` to proceed, `n` to reject |
+| **Undo mistakes** | `:undo` rolls back instantly with Git-independent file-level snapshots — works even without a repo |
+| **Stop re-explaining everything** | `:memory` persists project conventions and decisions across sessions, auto-injected next time |
+| **Don't silently burn tokens** | `:context` shows real-time message count, token estimates, and health status |
+| **Need more tools** | 8 built-in tools + MCP protocol support — connect your own tool servers for unlimited extensibility |
+| **Want custom prompts** | All system prompts, tool definitions, and commands are Markdown files in `prompts/` — edit and customize |
+| **Non-English experience** | Bilingual UI (Chinese/English), `Ctrl+O` fullscreen audit trail, `PgUp/PgDn` scrolling |
 
 ---
 
-## ✨ 功能特性
+## ✨ Features
 
-### 三种工作模式
+### Three Working Modes
 
-| 模式 | 说明 |
+| Mode | Description |
 |---|---|
-| **Chat** | 日常问答与代码讨论 |
-| **Agent** | 多轮工具调用，自动读写文件、执行命令、搜索代码，最多 20 轮自主循环 |
-| **Plan** | 先规划再执行，适合复杂任务 |
+| **Chat** | Everyday Q&A and code discussion |
+| **Agent** | Multi-turn tool calling with automatic file I/O, command execution, and code search — up to 20 autonomous rounds |
+| **Plan** | Plan first, execute later — ideal for complex tasks |
 
-### 核心能力
+### Core Capabilities
 
-- **流式响应** — 实时输出，终端渲染稳定低抖动
-- **会话持久化** — 每个工作区独立保存，启动自动恢复上次会话，关了终端不丢上下文
-- **工具调用闭环** — 8 个内置工具 + 动态 MCP 工具，过程与结果实时回流会话区
-- **风险分级审批** — 写文件和执行命令前暂停等待用户确认，模型说了不算，你说了算
-- **跨会话项目记忆** — `:memory` 保存项目知识，后续会话自动注入
-- **检查点与撤销** — `:checkpoint` / `:undo` / `:restore`，文件级快照不依赖 Git
-- **上下文窗口诊断** — `:context` 实时查看消息数、token 估算和健康度
-- **中英双语** — 界面语言自由切换
-- **Prompt Pack** — 系统提示词、工具定义、命令定义全在 `prompts/` 下，改文件就能定制
-- **原生 tool calling** — 优先使用 provider 原生函数调用，不支持时自动回退到文本解析
-- **全屏审计记录** — `Ctrl+O` 展开完整的工具输入、输出和耗时，普通视图折叠噪音
+- **Streaming Responses** — Real-time output with stable, low-jitter terminal rendering
+- **Session Persistence** — Per-workspace session files, auto-restore on startup — never lose context when closing the terminal
+- **Closed-Loop Tool Calling** — 8 built-in tools + dynamic MCP tools, with progress and results streaming back in real time
+- **Risk-Tiered Approval** — Pauses before file writes and command execution — the model doesn't decide, you do
+- **Cross-Session Memory** — `:memory` stores project knowledge, auto-injected into future sessions
+- **Checkpoints & Undo** — `:checkpoint` / `:undo` / `:restore` with Git-independent file-level snapshots
+- **Context Window Diagnostics** — `:context` for real-time message count, token estimation, and health
+- **Bilingual i18n** — Switch between Chinese and English interface
+- **Prompt Pack** — All system prompts, tool definitions, and commands live in `prompts/` as editable Markdown
+- **Native Tool Calling** — Uses provider-native function calling first, falls back to text parsing automatically
+- **Fullscreen Audit Trail** — `Ctrl+O` expands complete tool inputs, outputs, and elapsed time; regular view stays clean
 
 ---
 
-## 🎮 终端交互
+## 🎮 Terminal Interaction
 
-| 按键 | 行为 |
+| Key | Behavior |
 |---|---|
-| `Ctrl+O` | 打开 / 关闭全屏会话记录 |
-| `PgUp / PgDn` | 按屏滚动长会话 |
-| `Esc` | 执行中优先中止；浏览历史时回到底部；底部时退出全屏记录 |
-| `Tab / Enter` | 命令面板中先填入命令，不直接执行 |
+| `Ctrl+O` | Open / close fullscreen transcript |
+| `PgUp / PgDn` | Scroll long conversations one viewport at a time |
+| `Esc` | Abort active work; return to bottom while browsing; exit transcript when at bottom |
+| `Tab / Enter` | Fill in command from the panel without executing |
 
-- 普通会话只展示工具摘要，完整输入、输出和耗时在全屏记录中查看
-- 审批或配置向导出现时自动退出全屏记录，保证关键操作始终可见
+- Regular conversations show compact tool summaries; full inputs, outputs, and elapsed time available in fullscreen transcript
+- Approval and configuration prompts automatically exit transcript mode to keep critical actions visible
 
 ---
 
-## 🛠️ 工具与审批
+## 🛠️ Tools & Approval
 
-### 内置工具
+### Built-in Tools
 
-| 工具 | 能力 | 风险 |
+| Tool | Capability | Risk |
 |---|---|---|
-| `workspace-read` | 读取工作区摘要 | 🟢 safe |
-| `search-index` | 基于 ripgrep 的代码检索（无 rg 时回退到内置扫描） | 🟢 safe |
-| `glob-search` | 基于通配符的文件匹配 | 🟢 safe |
-| `file-ops` | `read` / `list` / `write` / `update` / `patch` | 🟢 读取 safe · 🟡 写入 careful |
-| `shell-runner` | 白名单命令执行 | 🟢 只读 safe · 🟡 验证类 careful |
-| `web-search` | 基于 DuckDuckGo 的公开网络搜索（无需 API key） | 🟡 careful |
-| `web-fetch` | 获取并提取 URL 页面的文本内容 | 🟡 careful |
-| `task` | 并行派发最多 8 个子任务，进度回传会话区 | 🟡 careful |
-| `mcp__*` | 调用已连接 MCP 服务器提供的工具 | 🟡 careful |
+| `workspace-read` | Read workspace summary | 🟢 safe |
+| `search-index` | ripgrep-based code search (falls back to built-in scanner) | 🟢 safe |
+| `glob-search` | Glob-pattern file matching | 🟢 safe |
+| `file-ops` | `read` / `list` / `write` / `update` / `patch` | 🟢 read safe · 🟡 write careful |
+| `shell-runner` | Whitelist command execution | 🟢 read-only safe · 🟡 verification careful |
+| `web-search` | DuckDuckGo public web search (no API key needed) | 🟡 careful |
+| `web-fetch` | Fetch and extract text from an HTTP(S) URL | 🟡 careful |
+| `task` | Dispatch up to 8 parallel subtasks with progress streaming | 🟡 careful |
+| `mcp__*` | Invoke tools from connected MCP servers | 🟡 careful |
 
-### 审批机制
+### Approval Mechanism
 
-写入文件和执行验证命令不由模型自行决定。执行会在真正落盘 / 执行前暂停，终端弹出审批面板，展示工具名、风险级别、操作摘要和目标路径：
+File writes and verification commands are not decided by the model alone. Execution pauses before actual disk writes / execution, triggering an approval panel displaying the tool name, risk level, operation summary, and target path:
 
-| 按键 | 行为 |
+| Key | Behavior |
 |---|---|
-| `y` | 批准这一次 |
-| `n` | 拒绝；拒绝原因回给模型，模型据此调整方案 |
-| `a` | 本次会话内始终允许该工具 |
+| `y` | Approve this instance |
+| `n` | Reject; rejection reason is returned to the model to adjust its approach |
+| `a` | Always allow this tool within the current session |
 
-> 工具描述里的 `allowWrite: true` 只是模型的自我声明，模型多打几个字就能绕过——真正的权限边界必须落在用户按键上。
+> `allowWrite: true` in tool descriptions is merely a self-declaration by the model — the model can bypass it with a few extra keystrokes. The true permission boundary must rest on user keystrokes.
 
 ---
 
-## ⚡ 快速开始
+## ⚡ Quick Start
 
 ```bash
-# 安装依赖
+# Install dependencies
 bun install
 
-# 开发运行
+# Development mode
 bun run dev
 
-# 构建
+# Build
 bun run build
 
-# 测试
+# Test
 bun test
 
-# 提交前验证（测试 + 类型检查 + 构建）
+# Verify (tests + type check + build)
 bun run verify
 ```
 
 ---
 
-## ⚙️ 配置
+## ⚙️ Configuration
 
-### 环境变量
+### Environment Variables
 
-| 变量 | 说明 |
+| Variable | Description |
 |---|---|
-| `ADNIFY_PROVIDER` | 模型提供商 |
-| `ADNIFY_API_KEY` | API 密钥 |
-| `ADNIFY_BASE_URL` | 自定义 API 地址 |
-| `ADNIFY_MODEL` | 模型名称 |
-| `ADNIFY_LOCALE` | 界面语言，支持 `zh-CN` 和 `en` |
-| `ADNIFY_HOME` | 应用数据目录（优先级最高） |
+| `ADNIFY_PROVIDER` | Model provider |
+| `ADNIFY_API_KEY` | API key |
+| `ADNIFY_BASE_URL` | Custom API endpoint |
+| `ADNIFY_MODEL` | Model name |
+| `ADNIFY_LOCALE` | Interface language — `zh-CN` or `en` |
+| `ADNIFY_HOME` | Application data directory (highest priority) |
 
-### 推荐配置命令
+### Recommended Configuration Commands
 
 ```
 :config
@@ -152,23 +151,23 @@ bun run verify
 :config clear api-key
 ```
 
-`:config init` 会进入临时输入面板配置模式，不会把配置对话写进会话区。
+`:config init` enters a temporary input panel configuration mode without writing the configuration conversation into the session area.
 
 ---
 
-## 💾 数据存储
+## 💾 Data Storage
 
-**所有数据只存在你的本地磁盘上**——会话记录、配置、记忆，没有任何云同步，没有任何遥测。
+**All data lives only on your local disk** — sessions, config, memory. No cloud sync, no telemetry.
 
-### 默认路径
+### Default Paths
 
-| 平台 | 路径 |
+| Platform | Path |
 |---|---|
 | **Windows** | `%APPDATA%\Adnify-Cli\settings.json` · `%LOCALAPPDATA%\Adnify-Cli` |
 | **macOS** | `~/Library/Application Support/Adnify-Cli` |
 | **Linux** | `$XDG_CONFIG_HOME/adnify-cli` · `$XDG_DATA_HOME/adnify-cli` |
 
-### 数据目录结构
+### Data Directory Structure
 
 ```
 Adnify-Cli/
@@ -179,100 +178,100 @@ Adnify-Cli/
     └── <workspace>.json
 ```
 
-文件级写入快照存放在工作区的 `.adnify/checkpoints/`，不依赖 Git。
+File-level write snapshots are stored in `.adnify/checkpoints/` within the workspace and do not require Git.
 
-### 自定义数据目录
+### Custom Data Directory
 
-不想放 C 盘？随便迁：
+Don't want it on your C drive? Move it anywhere:
 
 ```
-:storage              # 查看当前数据目录
-:storage set <path>   # 迁移到新目录（自动迁移 config 和 sessions）
-:storage reset        # 重置为系统默认路径
+:storage              # View current data directory
+:storage set <path>   # Migrate to a new directory (auto-migrates config and sessions)
+:storage reset        # Reset to system default path
 ```
 
 ---
 
-## 📋 命令一览
+## 📋 Command Reference
 
-### 会话与记忆
+### Session & Memory
 
 ```
-:session              # 当前会话信息
-:sessions             # 列出所有会话
-:resume [index|id]    # 恢复指定会话
-:memory [content]     # 保存项目记忆
-:memory list          # 查看记忆
-:memory clear         # 清空记忆
-:context              # 上下文窗口诊断
-:clear                # 清空当前会话
-:exit                 # 退出
+:session              # Current session info
+:sessions             # List all sessions
+:resume [index|id]    # Resume a specific session
+:memory [content]     # Save project memory
+:memory list          # View memories
+:memory clear         # Clear memories
+:context              # Context window diagnostics
+:clear                # Clear current session
+:exit                 # Exit
 ```
 
-### 模式与工具
+### Mode & Tools
 
 ```
 :mode chat | agent | plan
-:workspace            # 当前工作区信息
-:status               # 运行状态
-:tools                # 可用工具列表
+:workspace            # Current workspace info
+:status               # Runtime status
+:tools                # Available tools
 :model [provider] [model]
 ```
 
-### 检查点与撤销
+### Checkpoints & Undo
 
 ```
-:checkpoint [message] # 创建检查点
-:undo                 # 撤销最近检查点
-:restore [id|index]   # 恢复文件级快照
+:checkpoint [message] # Create checkpoint
+:undo                 # Undo last checkpoint
+:restore [id|index]   # Restore file-level snapshot
 ```
 
-### 其他
+### Others
 
 ```
-:help                 # 帮助
-:doctor               # 环境诊断
-:diff                 # 查看变更
-:review               # 代码审查
-:mcp                  # MCP 服务器管理
-:skill [name|list]    # 技能管理
+:help                 # Help
+:doctor               # Environment diagnostics
+:diff                 # View changes
+:review               # Code review
+:mcp                  # MCP server management
+:skill [name|list]    # Skill management
 ```
 
 ---
 
-## 🏗️ 架构
+## 🏗️ Architecture
 
-### 技术栈
+### Tech Stack
 
-| 层 | 选型 |
+| Layer | Choice |
 |---|---|
 | Runtime | Bun |
 | Language | TypeScript |
 | Terminal UI | [Ink](https://github.com/vadimdemedes/ink) + React |
 | AI SDK | [Vercel AI SDK](https://sdk.vercel.ai/) |
-| Architecture | DDD 风格分层架构 |
+| Architecture | DDD-style layered architecture |
 
-### 分层结构
+### Layered Structure
 
 ```
 src/
-├── domain/            # 领域模型、聚合根、值对象、领域行为
-├── application/       # 用例编排、端口定义、DTO、国际化
-├── infrastructure/    # 模型网关、配置读写、存储、Prompt 加载、工具执行
-└── presentation/      # Ink UI、交互控制器、终端布局、视图组件
+├── domain/            # Domain models, aggregate roots, value objects, domain behaviors
+├── application/       # Use case orchestration, port definitions, DTOs, i18n
+├── infrastructure/    # Model gateway, config I/O, storage, prompt loading, tool execution
+└── presentation/      # Ink UI, interaction controllers, terminal layout, view components
 ```
 
-### 设计原则
+### Design Principles
 
-- **高性能** — 终端渲染稳定，流式输出减少抖动与重复渲染
-- **低耦合** — 领域、应用、基础设施、展示层职责清晰
-- **高内聚** — 会话、配置、存储、提示词、命令系统各自独立演进
-- **高复用** — 端口、用例、Prompt Pack、存储解析和 UI 组件均可复用
-- **可扩展** — 为后续 Agent 编排、多轮执行和插件能力预留清晰入口
+- **High Performance** — Stable terminal rendering, minimal jitter and re-renders
+- **Loose Coupling** — Clear responsibilities across domain, application, infrastructure, and presentation layers
+- **High Cohesion** — Sessions, config, storage, prompts, and command systems evolve independently
+- **High Reusability** — Ports, use cases, Prompt Packs, storage parsers, and UI components are all reusable
+- **Extensibility** — Clear entry points reserved for future Agent orchestration, multi-turn execution, and plugins
 
-### 开发规范
+### Development Guidelines
 
-仓库内置 `.rules/` 目录，约束协作方式、架构边界和交付质量：
+The repository includes a `.rules/` directory to constrain collaboration methods, architectural boundaries, and delivery quality:
 
 - [.rules/README.md](./.rules/README.md)
 - [.rules/00-core.md](./.rules/00-core.md)
@@ -283,13 +282,13 @@ src/
 
 ---
 
-## 📈 里程碑
+## 📈 Milestones
 
-| 代号 | 目标 | 状态 |
+| Code | Goal | Status |
 |---|---|---|
-| **M1** | 会话持久化与启动恢复 | ✅ 已完成 |
-| **M2** | 工具调用与 Agent 能力（8 内置工具 + MCP + 20 轮 Agent 循环） | ✅ 已完成 |
-| **M3** | 审批 / 权限 / UI 打磨与产品化收口 | 🔨 进行中 |
+| **M1** | Session persistence and startup recovery | ✅ Complete |
+| **M2** | Tool calling and Agent capabilities (8 built-in tools + MCP + 20-round Agent loop) | ✅ Complete |
+| **M3** | Approval / Permissions / UI polish and productization | 🔨 In Progress |
 
 ---
 
