@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { GitWorktreeManager, type WorktreeCommandRunner } from './GitWorktreeManager'
 
 describe('GitWorktreeManager', () => {
@@ -13,16 +16,21 @@ describe('GitWorktreeManager', () => {
       },
     }
     const logger = { debug() {}, info() {}, warn() {}, error() {} }
-    const manager = new GitWorktreeManager('/repo', logger, runner)
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'adnify-worktree-test-'))
+    const manager = new GitWorktreeManager(workspaceRoot, logger, runner)
 
-    const handle = await manager.create('Implement Auth!')
-    const captured = await manager.capturePatch(handle)
-    await manager.dispose(handle)
+    try {
+      const handle = await manager.create('Implement Auth!')
+      const captured = await manager.capturePatch(handle)
+      await manager.dispose(handle)
 
-    expect(handle.path.replace(/\\/g, '/')).toContain('/repo/.adnify/worktrees/implement-auth')
-    expect(captured.patch).toContain('diff --git')
-    expect(calls.map((call) => call.args.join(' '))).toContain('add -N -- .')
-    expect(calls.map((call) => call.args.slice(0, 2).join(' '))).toContain('worktree add')
-    expect(calls.map((call) => call.args.slice(0, 3).join(' '))).toContain('worktree remove --force')
+      expect(handle.path).toBe(join(workspaceRoot, '.adnify', 'worktrees', 'implement-auth'))
+      expect(captured.patch).toContain('diff --git')
+      expect(calls.map((call) => call.args.join(' '))).toContain('add -N -- .')
+      expect(calls.map((call) => call.args.slice(0, 2).join(' '))).toContain('worktree add')
+      expect(calls.map((call) => call.args.slice(0, 3).join(' '))).toContain('worktree remove --force')
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+    }
   })
 })
