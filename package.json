@@ -23,7 +23,7 @@
     "url": "https://github.com/ad-naan/Adnify-Cli/issues"
   },
   "engines": {
-    "bun": ">=1.3.0"
+    "node": ">=20.0.0"
   },
   "preferGlobal": true,
   "packageManager": "bun@1.3.6",
@@ -40,13 +40,13 @@
   "scripts": {
     "dev": "bun run src/main.tsx",
     "start": "bun run src/main.tsx",
-    "build": "bun build ./src/main.tsx --outfile ./dist/adnify-cli.js --target bun",
+    "build": "bun build ./src/main.tsx --outfile ./dist/adnify-cli.js --target node",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test",
-    "verify": "bun test && bun run typecheck && bun run build",
+    "verify": "bun test && bun run typecheck && bun run build && node --check ./dist/adnify-cli.js",
     "check": "bun test src/domain/session/aggregates/ConversationSession.test.ts",
     "prepublishOnly": "bun run verify",
-    "postbuild": "node -e \"const fs=require('fs');const f='dist/adnify-cli.js';const s=fs.readFileSync(f,'utf8');if(!s.startsWith('#!')){fs.writeFileSync(f,'#!/usr/bin/env bun\\n'+s);}console.log('Shebang added.')\""
+    "postbuild": "node -e \"const fs=require('fs');const f='dist/adnify-cli.js';const s=fs.readFileSync(f,'utf8');const body=s.startsWith('#!')?s.replace(/^#![^\\n]*\\n/,''):s;fs.writeFileSync(f,'#!/usr/bin/env node\\n'+body);console.log('Node.js shebang added.')\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.23",

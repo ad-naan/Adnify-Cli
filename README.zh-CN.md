@@ -113,14 +113,14 @@
 # 通过 npm 全局安装
 npm install -g adnify-cli
 
-# 或通过 bun 全局安装
-bun install -g adnify-cli
+# 更新已有安装
+npm install -g adnify-cli@latest
 
 # 运行
 adnify
 ```
 
-> **需要 [Bun](https://bun.sh) 运行时。** 如果还没装，`adnify` 会提示你先安装。
+> 需要 Node.js 20 或更高版本。Bun 仅用于本地开发。
 
 ### 开发
 

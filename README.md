@@ -113,14 +113,14 @@ File writes and verification commands are not decided by the model alone. Execut
 # Install globally via npm
 npm install -g adnify-cli
 
-# Or install via bun
-bun install -g adnify-cli
+# Update an existing installation
+npm install -g adnify-cli@latest
 
 # Run
 adnify
 ```
 
-> **Requires [Bun](https://bun.sh) runtime.** If you don't have it yet, `adnify` will prompt you to install it.
+> Requires Node.js 20 or later. Bun is only required for local development.
 
 ### Development
 

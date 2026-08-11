@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AssistantProfile } from '../../domain/assistant/entities/AssistantProfile'
 import { ToolDescriptor } from '../../domain/tooling/entities/ToolDescriptor'
@@ -8,7 +8,10 @@ import type { PromptBundle } from './PromptBundle'
 
 type Frontmatter = Record<string, string>
 
-const PROMPT_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '../../../prompts')
+const moduleDirectory = fileURLToPath(new URL('.', import.meta.url))
+const PROMPT_ROOT = basename(moduleDirectory) === 'dist'
+  ? join(moduleDirectory, '../prompts')
+  : join(moduleDirectory, '../../../prompts')
 
 export async function loadPromptBundle(): Promise<PromptBundle> {
   const profileDocument = await readMarkdownDocument(join(PROMPT_ROOT, 'assistant/profile.md'))
