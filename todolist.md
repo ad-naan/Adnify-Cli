@@ -63,6 +63,8 @@
 - [x] 迁移到原生 tool calling（provider function calling），XML 文本解析降级为回退路径
 - [x] 工具输入契约收敛为单一来源（`toolInputSchemas.ts`，JSON Schema）
 - [x] 新增 `task` 工具：并行派发子代理，接入审批与进度回传
+- [x] 子代理开放受限只读工具（搜索、目录、文件读取），支持专职角色、优先级调度和取消
+- [x] 自动加载 `.adnify/instructions.md`、`AGENTS.md` 与 `.rules/*.md` 项目指令
 - [x] 文件级检查点（`:restore`），独立于 git 检查点
 - [x] 写入 diff 预览与命令风险展开
 - [x] 工具执行超时改为可暂停的 deadline，审批等待不再计入耗时
@@ -71,7 +73,7 @@
 
 - [ ] 考虑把 `file-ops` 进一步扩展为更结构化的 patch 方案
 - [ ] 继续提升模型选择工具与组合工具的稳定性
-- [ ] 子代理目前拿不到工具（结构性限制，避免绕过审批与递归派发）；如需放开要先设计约束
+- [ ] 子代理仍不能执行测试或修改文件；未来若增加写入型 worker，需先设计独立工作树和审批汇合点
 - [ ] 会话历史仍用 assistant/user 两种角色回填工具调用，尚未引入真正的 tool 角色消息
 - [ ] 补更完整的产品化 README 展示内容与截图
 
@@ -205,9 +207,11 @@
 **`task` 工具（子代理派发）**
 
 - 新增 `prompts/tools/task.md` + `taskHandler.ts`，最多 8 个子任务、并发默认 3（上限 4）
-- 子代理**拿不到任何工具**：`LocalSubAgentOrchestrator` 不持有 `toolExecutor`，
-  `streamChat` 也不传 `tools`。这是结构性限制，不是靠注释约束 —— 否则子代理既能绕过审批，
-  又能递归派发更多子代理
+- 子代理使用受限只读工具集：`workspace-read`、`search-index`、`glob-search`、
+  `file-ops` 的 `read/list`。协议 schema 和执行前校验双重禁止写入，也不开放 shell、web、MCP
+  或 `task`，因此不能绕过审批或递归派发更多子代理
+- 支持 `explore` / `review` / `test` / `general` 专职角色；高优先级任务先调度，单个 worker
+  最多 8 轮只读工具调用，取消时未启动任务直接标记为 cancelled
 - 派发前必须审批，预览里列出每个子任务标题；拿不到编排器（没配 API key）时直接失败，
   不弹审批 —— 弹了也只是让用户批准一件做不成的事
 - 全部子任务失败时返回 `ok: false`，避免模型把一堆错误信息当成调研结论往下走；

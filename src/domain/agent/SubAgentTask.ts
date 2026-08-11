@@ -10,6 +10,7 @@ export interface SubAgentTaskProps {
   instruction: string
   contextSummary?: string
   priority: SubAgentPriority
+  role: SubAgentRole
   status: SubAgentStatus
   result?: string
   error?: string
@@ -18,6 +19,7 @@ export interface SubAgentTaskProps {
 }
 
 export type SubAgentPriority = 'low' | 'normal' | 'high'
+export type SubAgentRole = 'general' | 'explore' | 'review' | 'test'
 
 export type SubAgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -34,6 +36,7 @@ export class SubAgentTask {
     instruction: string
     contextSummary?: string
     priority?: SubAgentPriority
+    role?: SubAgentRole
     createdAt?: Date
   }): SubAgentTask {
     return new SubAgentTask({
@@ -42,6 +45,7 @@ export class SubAgentTask {
       instruction: params.instruction,
       contextSummary: params.contextSummary,
       priority: params.priority ?? 'normal',
+      role: params.role ?? 'general',
       status: 'pending',
       createdAt: params.createdAt ?? new Date(),
     })
@@ -65,6 +69,10 @@ export class SubAgentTask {
 
   get priority(): SubAgentPriority {
     return this.props.priority
+  }
+
+  get role(): SubAgentRole {
+    return this.props.role
   }
 
   get status(): SubAgentStatus {
@@ -121,6 +129,7 @@ export class SubAgentTask {
     const lines = [
       `### Sub-Task: ${this.title}`,
       `Instruction: ${this.instruction}`,
+      `Role: ${this.role}`,
     ]
 
     if (this.contextSummary) {

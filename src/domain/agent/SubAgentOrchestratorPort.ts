@@ -1,4 +1,5 @@
-import type { SubAgentTask, SubAgentPriority } from './SubAgentTask'
+import type { SubAgentTask, SubAgentPriority, SubAgentRole } from './SubAgentTask'
+import type { WorkspaceContext } from '../workspace/entities/WorkspaceContext'
 
 /**
  * 子代理编排器接口。
@@ -18,6 +19,7 @@ export interface SubAgentOrchestratorPort {
     instruction: string
     contextSummary?: string
     priority?: SubAgentPriority
+    role?: SubAgentRole
   }>): SubAgentTask[]
 
   /**
@@ -28,6 +30,7 @@ export interface SubAgentOrchestratorPort {
     tasks: SubAgentTask[],
     options: {
       maxConcurrency: number
+      workspace: WorkspaceContext
       abortSignal?: AbortSignal
       onTaskStart?: (taskId: string, title: string) => void
       onTaskComplete?: (taskId: string, success: boolean, result?: string) => void

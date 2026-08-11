@@ -147,7 +147,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
         minItems: 1,
         maxItems: 8,
         description:
-          'Subtasks to run in parallel. Each runs in its own isolated context and cannot see this conversation or call tools.',
+          'Independent research subtasks. Each runs in isolated context with read-only workspace search and file access.',
         items: {
           type: 'object',
           properties: {
@@ -167,7 +167,12 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
             priority: {
               type: 'string',
               enum: ['low', 'normal', 'high'],
-              description: 'Defaults to "normal". Does not affect ordering, only reporting.',
+              description: 'Defaults to "normal". Higher-priority tasks are scheduled first.',
+            },
+            role: {
+              type: 'string',
+              enum: ['general', 'explore', 'review', 'test'],
+              description: 'Specialized read-only behavior for the subtask. Defaults to "general".',
             },
           },
           required: ['title', 'instruction'],

@@ -18,6 +18,8 @@ export interface ToolExecutionRequest {
   toolId: string
   input: string
   workspace: WorkspaceContext
+  /** Propagates user cancellation into long-running tools such as sub-agent batches. */
+  abortSignal?: AbortSignal
   approvalGranted?: boolean
   /**
    * 执行中途的进度回调。

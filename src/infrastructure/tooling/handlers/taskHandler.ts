@@ -1,5 +1,5 @@
 import type { SubAgentOrchestratorPort } from '../../../domain/agent/SubAgentOrchestratorPort'
-import type { SubAgentPriority, SubAgentTask } from '../../../domain/agent/SubAgentTask'
+import type { SubAgentPriority, SubAgentRole, SubAgentTask } from '../../../domain/agent/SubAgentTask'
 import type { ToolExecutionRequest, ToolExecutionResult } from '../../../application/ports/ToolExecutorPort'
 import { parseJsonObject } from '../toolPathGuard'
 import { toolFailure, toolSuccess } from './ToolHandler'
@@ -18,6 +18,7 @@ interface ParsedTaskRequest {
     instruction: string
     contextSummary?: string
     priority?: SubAgentPriority
+    role?: SubAgentRole
   }>
   maxConcurrency: number
 }
@@ -28,6 +29,12 @@ export type ParseTaskResult =
 
 function parsePriority(value: unknown): SubAgentPriority | undefined {
   return value === 'low' || value === 'normal' || value === 'high' ? value : undefined
+}
+
+function parseRole(value: unknown): SubAgentRole | undefined {
+  return value === 'general' || value === 'explore' || value === 'review' || value === 'test'
+    ? value
+    : undefined
 }
 
 /**
@@ -90,7 +97,13 @@ export function parseTaskRequest(request: ToolExecutionRequest): ParseTaskResult
         ? candidate.contextSummary.trim()
         : undefined
 
-    tasks.push({ title, instruction, contextSummary, priority: parsePriority(candidate.priority) })
+    tasks.push({
+      title,
+      instruction,
+      contextSummary,
+      priority: parsePriority(candidate.priority),
+      role: parseRole(candidate.role),
+    })
   }
 
   const rawConcurrency = prompt.maxConcurrency
@@ -110,7 +123,7 @@ export function formatTaskPreview(parsed: ParsedTaskRequest): string {
     `Dispatches ${parsed.tasks.length} sub-agent${parsed.tasks.length === 1 ? '' : 's'} (up to ${parsed.maxConcurrency} at a time):`,
     ...lines,
     '',
-    'Each runs a separate model request. They cannot call tools or modify files.',
+    'Each runs in isolated context with read-only workspace tools. They cannot modify files or run shell commands.',
   ].join('\n')
 }
 
@@ -161,6 +174,8 @@ export async function runTaskBatch(
 
   const finished = await orchestrator.runBatch(created, {
     maxConcurrency: parsed.maxConcurrency,
+    workspace: request.workspace,
+    abortSignal: request.abortSignal,
     // 把编排器的进度转成给人看的一行字。
     // 少了这一步，派一批子代理时界面会静默几十秒，跟卡死没法区分。
     onTaskStart: (_taskId, title) => {

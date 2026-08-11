@@ -50,6 +50,8 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 - **Streaming Responses** — Real-time output with stable, low-jitter terminal rendering
 - **Session Persistence** — Per-workspace session files, auto-restore on startup — never lose context when closing the terminal
 - **Closed-Loop Tool Calling** — 8 built-in tools + dynamic MCP tools, with progress and results streaming back in real time
+- **Parallel Research Sub-agents** — `explore`, `review`, `test`, and `general` roles with isolated context and restricted read-only code tools
+- **Automatic Project Instructions** — Loads `.adnify/instructions.md`, `AGENTS.md`, and ordered `.rules/*.md`
 - **Risk-Tiered Approval** — Pauses before file writes and command execution — the model doesn't decide, you do
 - **Cross-Session Memory** — `:memory` stores project knowledge, auto-injected into future sessions
 - **Checkpoints & Undo** — `:checkpoint` / `:undo` / `:restore` with Git-independent file-level snapshots
@@ -287,7 +289,7 @@ src/
 - **Loose Coupling** — Clear responsibilities across domain, application, infrastructure, and presentation layers
 - **High Cohesion** — Sessions, config, storage, prompts, and command systems evolve independently
 - **High Reusability** — Ports, use cases, Prompt Packs, storage parsers, and UI components are all reusable
-- **Extensibility** — Clear entry points reserved for future Agent orchestration, multi-turn execution, and plugins
+- **Extensibility** — Bounded parallel Agent orchestration, multi-turn execution, and clear plugin entry points
 
 ### Development Guidelines
 

@@ -26,6 +26,7 @@ import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConf
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import type { HookPort } from '../../application/ports/HookPort'
+import { loadProjectInstructions } from '../prompt/loadProjectInstructions'
 
 export class ModelAssistantResponder implements AssistantResponderPort {
   private readonly maxAgentTurns = 20
@@ -251,6 +252,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
             toolId: toolCall.name,
             input: toolCall.input,
             workspace: command.workspace,
+            abortSignal: command.abortSignal,
             onProgress,
           }),
         )
@@ -371,6 +373,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
     // Build repo map from code index (if available)
     const repoMapBlock = await this.buildRepoMapBlock(command)
+    const projectInstructions = await loadProjectInstructions(command.workspace.rootPath)
 
     const systemPrompt = this.buildSystemPrompt(
       command.session,
@@ -380,6 +383,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       command.memoryBlock,
       skillListing,
       repoMapBlock,
+      projectInstructions,
       // 还没确认原生可用时也注入 —— 第一轮宁可多给一段散文，也不能让工具完全不可用。
       this.nativeToolsSupported !== true,
     )
@@ -409,6 +413,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     memoryBlock?: string,
     skillListing?: string,
     repoMapBlock?: string,
+    projectInstructions?: string,
     includeTextToolProtocol = true,
   ): string {
     const modePrompt = promptSet.modes[session.mode]
@@ -448,6 +453,15 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
     if (repoMapBlock) {
       promptParts.push(repoMapBlock, '')
+    }
+
+    if (projectInstructions) {
+      promptParts.push(
+        '## Project Instructions',
+        'Follow these repository-owned rules unless they conflict with higher-priority system or user instructions.',
+        projectInstructions,
+        '',
+      )
     }
 
     promptParts.push(

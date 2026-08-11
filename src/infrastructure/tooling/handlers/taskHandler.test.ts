@@ -77,6 +77,14 @@ describe('parseTaskRequest', () => {
 
     expect(parsed.tasks[0]?.priority).toBeUndefined()
   })
+
+  test('accepts specialized sub-agent roles', () => {
+    const parsed = parseOrThrow(
+      JSON.stringify({ tasks: [{ title: 'review', instruction: 'audit it', role: 'review' }] }),
+    )
+
+    expect(parsed.tasks[0]?.role).toBe('review')
+  })
 })
 
 describe('formatTaskPreview', () => {
@@ -95,8 +103,9 @@ describe('formatTaskPreview', () => {
     expect(preview).toContain('Dispatches 2 sub-agents')
     expect(preview).toContain('1. Audit logging')
     expect(preview).toContain('2. Audit errors')
-    // 用户要知道子代理动不了文件，否则这个审批没法判断。
-    expect(preview).toContain('cannot call tools')
+    // 用户要知道子代理只能做只读研究，否则这个审批没法判断。
+    expect(preview).toContain('read-only workspace tools')
+    expect(preview).toContain('cannot modify files')
   })
 })
 
