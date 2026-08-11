@@ -1,14 +1,41 @@
 {
   "name": "adnify-cli",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Adnify-Cli - a DDD-first AI coding assistant for the terminal",
+  "version": "0.0.1",
+  "description": "Adnify-Cli — Your terminal. Your model. Your code.",
   "author": "adnaan",
+  "license": "MIT",
   "type": "module",
+  "keywords": [
+    "ai",
+    "cli",
+    "terminal",
+    "coding-assistant",
+    "agent",
+    "ink",
+    "bun"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ad-naan/Adnify-Cli.git"
+  },
+  "homepage": "https://github.com/ad-naan/Adnify-Cli#readme",
+  "bugs": {
+    "url": "https://github.com/ad-naan/Adnify-Cli/issues"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  },
   "packageManager": "bun@1.3.6",
   "bin": {
     "adnify": "./dist/adnify-cli.js"
   },
+  "files": [
+    "dist/adnify-cli.js",
+    "prompts/",
+    ".rules/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "bun run src/main.tsx",
     "start": "bun run src/main.tsx",
@@ -16,7 +43,9 @@
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test",
     "verify": "bun test && bun run typecheck && bun run build",
-    "check": "bun test src/domain/session/aggregates/ConversationSession.test.ts"
+    "check": "bun test src/domain/session/aggregates/ConversationSession.test.ts",
+    "prepublishOnly": "bun run verify",
+    "postbuild": "node -e \"const fs=require('fs');const f='dist/adnify-cli.js';const s=fs.readFileSync(f,'utf8');if(!s.startsWith('#!')){fs.writeFileSync(f,'#!/usr/bin/env bun\\n'+s);}console.log('Shebang added.')\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.23",
