@@ -11,6 +11,8 @@ import {
   type ResolveAppStorageOptions,
 } from './resolveAppStorage'
 import { readStorageSettingsFile, writeStorageSettingsFile } from './storageSettingsFile'
+import type { AnimationLevel } from '../../application/dto/UiPreferences'
+import type { AppLocale } from '../../application/i18n/AppI18n'
 
 const CONFIG_FILE = 'config.json'
 const SESSIONS_DIR = 'sessions'
@@ -31,6 +33,7 @@ export class FileStorageSettingsAdapter implements StorageSettingsPort {
 
   async setDataDirectory(path: string): Promise<StorageSettingsUpdateResult> {
     const current = await resolveAppStorage(this.options)
+    const settings = await readStorageSettingsFile(current.settingsPath)
     const nextDataRoot = normalizeStoragePath(path.trim(), this.options.platform)
 
     if (!nextDataRoot) {
@@ -38,6 +41,7 @@ export class FileStorageSettingsAdapter implements StorageSettingsPort {
     }
 
     await writeStorageSettingsFile(current.settingsPath, {
+      ...settings,
       dataDirectory: nextDataRoot,
     })
 
@@ -57,8 +61,10 @@ export class FileStorageSettingsAdapter implements StorageSettingsPort {
 
   async resetDataDirectory(): Promise<StorageSettingsUpdateResult> {
     const current = await resolveAppStorage(this.options)
+    const settings = await readStorageSettingsFile(current.settingsPath)
 
-    await writeStorageSettingsFile(current.settingsPath, {})
+    const { dataDirectory: _discardedDataDirectory, ...remainingSettings } = settings
+    await writeStorageSettingsFile(current.settingsPath, remainingSettings)
 
     const snapshot = await this.inspect()
 
@@ -68,6 +74,18 @@ export class FileStorageSettingsAdapter implements StorageSettingsPort {
       migratedSessions: false,
       requiresRestart: true,
     }
+  }
+
+  async setLocale(locale: AppLocale): Promise<void> {
+    const storage = await resolveAppStorage(this.options)
+    const settings = await readStorageSettingsFile(storage.settingsPath)
+    await writeStorageSettingsFile(storage.settingsPath, { ...settings, locale })
+  }
+
+  async setAnimationLevel(animationLevel: AnimationLevel): Promise<void> {
+    const storage = await resolveAppStorage(this.options)
+    const settings = await readStorageSettingsFile(storage.settingsPath)
+    await writeStorageSettingsFile(storage.settingsPath, { ...settings, animationLevel })
   }
 }
 

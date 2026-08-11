@@ -154,6 +154,7 @@ bun run verify
 | `ADNIFY_BASE_URL` | Custom API endpoint |
 | `ADNIFY_MODEL` | Model name |
 | `ADNIFY_LOCALE` | Interface language — `zh-CN` or `en` |
+| `ADNIFY_ANIMATION_LEVEL` | Animation level — `off`, `minimal`, or `full` (default) |
 | `ADNIFY_HOME` | Application data directory (highest priority) |
 
 ### Recommended Configuration Commands
@@ -161,14 +162,16 @@ bun run verify
 ```
 :config
 :config init
-:config set provider <value>
+:config set provider <value> [model]
 :config set model <value>
 :config set api-key <value>
 :config set base-url <value>
 :config clear api-key
+:language <zh-CN|en>
+:animation <off|minimal|full>
 ```
 
-`:config init` enters a temporary input panel configuration mode without writing the configuration conversation into the session area.
+`:config init` enters a temporary setup panel. Provider and model choices support Up/Down, Enter, and numeric shortcuts. Setup prompts are not written into the conversation.
 
 ---
 

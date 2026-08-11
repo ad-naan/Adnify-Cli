@@ -3,6 +3,8 @@ import { dirname } from 'node:path'
 
 export interface StorageSettingsFile {
   dataDirectory?: string
+  locale?: 'zh-CN' | 'en'
+  animationLevel?: 'off' | 'minimal' | 'full'
 }
 
 export async function readStorageSettingsFile(path: string): Promise<StorageSettingsFile> {

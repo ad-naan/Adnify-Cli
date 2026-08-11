@@ -246,6 +246,44 @@ describe('SubmitPromptUseCase', () => {
     expect(result.session.getMessages()[1]?.content).toBe('stream reply')
   })
 
+  test('executeStreaming should publish the user message before workspace or API work', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-optimistic',
+      title: 'test',
+      mode: 'agent',
+      workspacePath: '/test',
+      createdAt: new Date('2026-01-01'),
+    })
+    await repo.save(session)
+
+    const accepted: string[] = []
+    const useCase = new SubmitPromptUseCase(
+      repo,
+      { inspect: async () => { throw new Error('workspace unavailable') } },
+      createMockResponder('unused'),
+      createMockConfig(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:01:00Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    await expect(useCase.executeStreaming(
+      { sessionId: session.id, prompt: 'render me now' },
+      {
+        onUserMessage: (acceptedSession) => {
+          accepted.push(acceptedSession.getMessages()[0]?.content ?? '')
+        },
+        onChunk: () => {},
+        onDone: () => {},
+        onError: () => {},
+      },
+    )).rejects.toThrow('workspace unavailable')
+
+    expect(accepted).toEqual(['render me now'])
+  })
+
   test('executeStreaming should handle errors gracefully', async () => {
     const repo = createMockSessionRepo()
     const session = ConversationSession.create({

@@ -45,4 +45,28 @@ describe('FileStorageSettingsAdapter', () => {
     const copiedSession = await readFile(join(customDir, 'sessions', 'session-1.json'), 'utf8')
     expect(copiedSession).toContain('"session-1"')
   })
+
+  test('should persist locale and animation without overwriting either preference', async () => {
+    const tempParent = join(process.cwd(), '.tmp')
+    await mkdir(tempParent, { recursive: true })
+    const root = await mkdtemp(join(tempParent, 'adnify-preferences-'))
+    const settingsEnvRoot = join(root, 'settings-env')
+    const dataEnvRoot = join(root, 'data-env')
+    await mkdir(settingsEnvRoot, { recursive: true })
+    await mkdir(dataEnvRoot, { recursive: true })
+
+    const isWin = process.platform === 'win32'
+    const appName = isWin ? 'Adnify-Cli' : 'adnify-cli'
+    const adapter = new FileStorageSettingsAdapter(
+      isWin
+        ? { env: { APPDATA: settingsEnvRoot, LOCALAPPDATA: dataEnvRoot }, platform: 'win32' }
+        : { env: { XDG_CONFIG_HOME: settingsEnvRoot, XDG_DATA_HOME: dataEnvRoot }, platform: 'linux' },
+    )
+
+    await adapter.setLocale('zh-CN')
+    await adapter.setAnimationLevel('full')
+
+    const raw = await readFile(join(settingsEnvRoot, appName, 'settings.json'), 'utf8')
+    expect(JSON.parse(raw)).toEqual({ locale: 'zh-CN', animationLevel: 'full' })
+  })
 })

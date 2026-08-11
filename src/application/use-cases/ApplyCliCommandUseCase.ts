@@ -21,6 +21,7 @@ import {
   createCliCommandOutputContent,
 } from '../support/CliTranscriptMarkup'
 import { formatWorkspaceSummary } from '../support/formatWorkspaceSummary'
+import { PROVIDER_PRESETS } from '../../infrastructure/config/providerPresets'
 
 const execFileAsync = promisify(execFile)
 
@@ -529,7 +530,9 @@ export class ApplyCliCommandUseCase {
 
         if (subcommand === 'set') {
           const field = args[1]?.toLowerCase()
-          const value = rawArgs.replace(/^set\s+\S+\s*/i, '').trim()
+          const value = field === 'provider'
+            ? args[2] ?? ''
+            : rawArgs.replace(/^set\s+\S+\s*/i, '').trim()
 
           if (!field || !value) {
             addCommandOutput(formatConfigCommandHelp(this.i18n), {
@@ -556,9 +559,21 @@ export class ApplyCliCommandUseCase {
             return persist(this.i18n.t('cli.config.commandInvalidStatus'))
           }
 
-          await this.modelConfigStore.save(nextConfigResult.config)
-          const activeConfig = command.configUpdater?.applyModelConfig(nextConfigResult.config)
-          const finalConfig = activeConfig ?? nextConfigResult.config
+          let nextConfig = nextConfigResult.config
+          if (field === 'provider') {
+            const providerName = args[2] ?? ''
+            const explicitModel = args[3]
+            const preset = PROVIDER_PRESETS.find((item) => item.provider === providerName)
+            nextConfig = {
+              ...nextConfig,
+              baseUrl: preset?.baseUrl ?? nextConfig.baseUrl,
+              model: explicitModel ?? preset?.defaultModel ?? nextConfig.model,
+            }
+          }
+
+          await this.modelConfigStore.save(nextConfig)
+          const activeConfig = command.configUpdater?.applyModelConfig(nextConfig)
+          const finalConfig = activeConfig ?? nextConfig
 
           addCommandOutput(formatConfigUpdatedText(finalConfig, field, this.i18n), {
             title: this.i18n.t('transcript.config'),
@@ -640,6 +655,78 @@ export class ApplyCliCommandUseCase {
           tone: 'info',
         })
         return persist(this.i18n.t('cli.config.status'))
+      }
+
+      case 'language':
+      case 'lang': {
+        addCommandInput()
+        const requested = args[0]
+
+        if (!requested) {
+          const message = [
+            this.i18n.t('cli.language.current', { value: this.i18n.locale }),
+            this.i18n.t('cli.language.usage'),
+          ].join('\n')
+          addCommandOutput(message, {
+            title: this.i18n.t('transcript.config'),
+            tone: 'info',
+          })
+          return persist(this.i18n.t('cli.language.current', { value: this.i18n.locale }))
+        }
+
+        const normalizedInput = requested.toLowerCase()
+        const locale = normalizedInput === 'zh' || normalizedInput === 'zh-cn'
+          ? 'zh-CN'
+          : normalizedInput === 'en' || normalizedInput === 'en-us'
+            ? 'en'
+            : null
+
+        if (!locale) {
+          const message = this.i18n.t('cli.language.invalid', { value: requested })
+          addCommandOutput(message, {
+            title: this.i18n.t('transcript.config'),
+            tone: 'warning',
+          })
+          return persist(message)
+        }
+
+        if (!this.storageSettings.setLocale) {
+          throw new Error('Language settings are unavailable in this runtime')
+        }
+        await this.storageSettings.setLocale(locale)
+        const message = this.i18n.t('cli.language.saved', { value: locale })
+        addCommandOutput(message, {
+          title: this.i18n.t('transcript.config'),
+          tone: 'success',
+        })
+        return persist(message)
+      }
+
+      case 'animation': {
+        addCommandInput()
+        const level = args[0]?.toLowerCase()
+
+        if (level !== 'off' && level !== 'minimal' && level !== 'full') {
+          const message = level
+            ? this.i18n.t('cli.animation.invalid', { value: level })
+            : this.i18n.t('cli.animation.usage')
+          addCommandOutput(message, {
+            title: this.i18n.t('transcript.config'),
+            tone: level ? 'warning' : 'info',
+          })
+          return persist(message)
+        }
+
+        if (!this.storageSettings.setAnimationLevel) {
+          throw new Error('Animation settings are unavailable in this runtime')
+        }
+        await this.storageSettings.setAnimationLevel(level)
+        const message = this.i18n.t('cli.animation.saved', { value: level })
+        addCommandOutput(message, {
+          title: this.i18n.t('transcript.config'),
+          tone: 'success',
+        })
+        return persist(message)
       }
 
       case 'session': {

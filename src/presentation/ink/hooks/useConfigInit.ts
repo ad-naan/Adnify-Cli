@@ -9,6 +9,7 @@ type InitStep =
   | 'idle'
   | 'select-provider'
   | 'select-model'
+  | 'enter-model'
   | 'enter-apikey'
   | 'enter-baseurl'
   | 'confirm'
@@ -21,6 +22,8 @@ export interface ConfigInitState {
   start: () => void
   stop: () => void
   handleInput: (input: string) => Promise<ConfigInitResult | null>
+  moveSelection: (direction: 'up' | 'down') => void
+  isSelectionStep: boolean
 }
 
 export interface ConfigInitResult {
@@ -35,6 +38,7 @@ export interface ConfigInitResult {
 export function useConfigInit(i18n: AppI18n): ConfigInitState {
   const [step, setStep] = useState<InitStep>('idle')
   const [errorText, setErrorText] = useState('')
+  const [selectedIndex, setSelectedIndex] = useState(0)
   const chosen = useRef<{
     preset: ProviderPreset | null
     model: string
@@ -54,9 +58,9 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
       case 'select-provider': {
         const lines = [i18n.t('config.selectProviderTitle')]
         PROVIDER_PRESETS.forEach((preset, index) => {
-          lines.push(`  ${index + 1}. ${preset.label} (${preset.models.slice(0, 3).join(' / ')})`)
+          lines.push(`${index === selectedIndex ? '›' : ' '} ${index + 1}. ${preset.label} (${preset.models.slice(0, 3).join(' / ')})`)
         })
-        lines.push(`  ${PROVIDER_PRESETS.length + 1}. ${i18n.t('config.customProvider')}`)
+        lines.push(`${selectedIndex === PROVIDER_PRESETS.length ? '›' : ' '} ${PROVIDER_PRESETS.length + 1}. ${i18n.t('config.customProvider')}`)
         lines.push('')
         lines.push(i18n.t('config.enterIndexContinue'))
         return lines.join('\n')
@@ -71,7 +75,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
         const lines = [i18n.t('config.selectModelTitle', { provider: preset.label })]
         preset.models.forEach((model, index) => {
           const isDefault = model === preset.defaultModel ? i18n.t('config.defaultSuffix') : ''
-          lines.push(`  ${index + 1}. ${model}${isDefault}`)
+          lines.push(`${index === selectedIndex ? '›' : ' '} ${index + 1}. ${model}${isDefault}`)
         })
         lines.push('')
         lines.push(i18n.t('config.selectModelInstruction'))
@@ -83,6 +87,9 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
 
       case 'enter-baseurl':
         return i18n.t('config.enterBaseUrl')
+
+      case 'enter-model':
+        return i18n.t('config.enterCustomModel')
 
       case 'confirm': {
         const current = chosen.current
@@ -104,7 +111,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
       default:
         return ''
     }
-  }, [i18n, step])
+  }, [i18n, selectedIndex, step])
 
   const start = useCallback(() => {
     chosen.current = {
@@ -115,6 +122,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
       isCustom: false,
     }
     setErrorText('')
+    setSelectedIndex(0)
     setStep('select-provider')
   }, [])
 
@@ -129,7 +137,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
 
     switch (step) {
       case 'select-provider': {
-        const index = Number.parseInt(trimmed, 10) - 1
+        const index = trimmed ? Number.parseInt(trimmed, 10) - 1 : selectedIndex
         const maxIndex = PROVIDER_PRESETS.length
 
         if (Number.isNaN(index) || index < 0 || index > maxIndex) {
@@ -148,6 +156,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
         chosen.current.preset = preset
         chosen.current.baseUrl = preset.baseUrl
         chosen.current.isCustom = false
+        setSelectedIndex(Math.max(0, preset.models.indexOf(preset.defaultModel)))
         setStep('select-model')
         return null
       }
@@ -159,16 +168,12 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
           return null
         }
 
-        if (!trimmed) {
-          chosen.current.model = preset.defaultModel
-        } else {
-          const index = Number.parseInt(trimmed, 10) - 1
-          if (Number.isNaN(index) || index < 0 || index >= preset.models.length) {
-            setErrorText(i18n.t('config.modelRangeError', { max: preset.models.length }))
-            return null
-          }
-          chosen.current.model = preset.models[index]!
+        const index = trimmed ? Number.parseInt(trimmed, 10) - 1 : selectedIndex
+        if (Number.isNaN(index) || index < 0 || index >= preset.models.length) {
+          setErrorText(i18n.t('config.modelRangeError', { max: preset.models.length }))
+          return null
         }
+        chosen.current.model = preset.models[index]!
 
         setStep('enter-apikey')
         return null
@@ -182,6 +187,17 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
 
         chosen.current.baseUrl = trimmed
         chosen.current.model = ''
+        setStep('enter-model')
+        return null
+      }
+
+      case 'enter-model': {
+        if (!trimmed) {
+          setErrorText(i18n.t('config.modelRequired'))
+          return null
+        }
+
+        chosen.current.model = trimmed
         setStep('enter-apikey')
         return null
       }
@@ -193,10 +209,6 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
         }
 
         chosen.current.apiKey = trimmed
-
-        if (chosen.current.isCustom && !chosen.current.model) {
-          chosen.current.model = 'gpt-4o-mini'
-        }
 
         setStep('confirm')
         return null
@@ -245,7 +257,23 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
       default:
         return null
     }
-  }, [i18n, step])
+  }, [i18n, selectedIndex, step])
+
+  const moveSelection = useCallback((direction: 'up' | 'down') => {
+    const itemCount = step === 'select-provider'
+      ? PROVIDER_PRESETS.length + 1
+      : step === 'select-model'
+        ? chosen.current.preset?.models.length ?? 0
+        : 0
+
+    if (itemCount <= 0) return
+    setErrorText('')
+    setSelectedIndex((current) =>
+      direction === 'up'
+        ? (current - 1 + itemCount) % itemCount
+        : (current + 1) % itemCount,
+    )
+  }, [step])
 
   return {
     isActive: step !== 'idle' && step !== 'done',
@@ -254,5 +282,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
     start,
     stop,
     handleInput,
+    moveSelection,
+    isSelectionStep: step === 'select-provider' || step === 'select-model',
   }
 }

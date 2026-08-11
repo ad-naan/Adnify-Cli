@@ -15,15 +15,17 @@ function resolveAnimationLevel(input?: string | null): AnimationLevel {
     case 'minimal':
     case 'low':
     case '1':
-    default:
       return 'minimal'
+    default:
+      return 'full'
   }
 }
 
 export function resolveUiPreferences(
   env: Record<string, string | undefined> = process.env,
+  persistedAnimationLevel?: string | null,
 ): UiPreferences {
   return {
-    animationLevel: resolveAnimationLevel(env.ADNIFY_ANIMATION_LEVEL),
+    animationLevel: resolveAnimationLevel(env.ADNIFY_ANIMATION_LEVEL ?? persistedAnimationLevel),
   }
 }

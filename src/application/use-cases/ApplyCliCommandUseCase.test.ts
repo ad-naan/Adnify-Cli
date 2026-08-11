@@ -904,6 +904,85 @@ describe('ApplyCliCommandUseCase', () => {
     expect(result.statusLine).toContain('Configuration updated')
   })
 
+  test('should update provider, base URL, and model together', async () => {
+    const repo = createMockSessionRepo()
+    const store = createMockModelConfigStore()
+    const session = ConversationSession.create({
+      id: 'sess-provider-config',
+      title: 'Config',
+      mode: 'agent',
+      workspacePath: '/workspace/adnify-cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      createMockStorageSettings(),
+      store,
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':config set provider anthropic claude-opus-4-20250514',
+      bootstrap: createBootstrapSnapshot(),
+      configUpdater: { applyModelConfig: (config) => config },
+    })
+
+    expect(store.saved[0]).toMatchObject({
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-opus-4-20250514',
+    })
+  })
+
+  test('should persist language and animation preferences', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-preferences',
+      title: 'Preferences',
+      mode: 'agent',
+      workspacePath: '/workspace/adnify-cli',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    })
+    await repo.save(session)
+
+    let savedLocale = ''
+    let savedAnimation = ''
+    const storageSettings: StorageSettingsPort = {
+      ...createMockStorageSettings(),
+      setLocale: async (locale) => { savedLocale = locale },
+      setAnimationLevel: async (level) => { savedAnimation = level },
+    }
+    const useCase = new ApplyCliCommandUseCase(
+      repo,
+      storageSettings,
+      createMockModelConfigStore(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:05:00.000Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':language zh-CN',
+      bootstrap: createBootstrapSnapshot(),
+    })
+    await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':animation full',
+      bootstrap: createBootstrapSnapshot(),
+    })
+
+    expect(savedLocale).toBe('zh-CN')
+    expect(savedAnimation).toBe('full')
+  })
+
   test('should list available skills', async () => {
     const repo = createMockSessionRepo()
     const session = ConversationSession.create({

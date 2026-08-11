@@ -154,6 +154,7 @@ bun run verify
 | `ADNIFY_BASE_URL` | 自定义 API 地址 |
 | `ADNIFY_MODEL` | 模型名称 |
 | `ADNIFY_LOCALE` | 界面语言，支持 `zh-CN` 和 `en` |
+| `ADNIFY_ANIMATION_LEVEL` | 动效级别，支持 `off`、`minimal` 和 `full`（默认） |
 | `ADNIFY_HOME` | 应用数据目录（优先级最高） |
 
 ### 推荐配置命令
@@ -161,14 +162,16 @@ bun run verify
 ```
 :config
 :config init
-:config set provider <value>
+:config set provider <value> [model]
 :config set model <value>
 :config set api-key <value>
 :config set base-url <value>
 :config clear api-key
+:language <zh-CN|en>
+:animation <off|minimal|full>
 ```
 
-`:config init` 会进入临时输入面板配置模式，不会把配置对话写进会话区。
+`:config init` 会进入临时输入面板配置模式；供应商和模型支持上下键选择、回车确认，也保留数字快捷选择。配置对话不会写进会话区。
 
 ---
 

@@ -32,6 +32,8 @@ export interface SubmitPromptResult {
 }
 
 export interface StreamingCallbacks {
+  /** Called as soon as the user message has been accepted, before workspace/API work starts. */
+  onUserMessage?: (session: ConversationSession) => void
   onChunk: (delta: string) => void
   onTranscript?: (content: string) => void
   onApproval?: (approval: PendingToolApproval) => void
@@ -101,6 +103,7 @@ export class SubmitPromptUseCase {
     const now = this.clock.now()
     this.updateSessionTitleIfNeeded(session, prompt, now)
     session.addUserMessage(this.idGenerator.next(), now, prompt)
+    callbacks.onUserMessage?.(session.clone())
 
     const workspace = await this.workspaceContextPort.inspect(session.workspacePath)
     const memoryBlock = command.memoryBlock

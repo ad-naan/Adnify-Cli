@@ -206,6 +206,7 @@ export function App(props: AppProps) {
             mode={session.mode}
             modelLabel={modelLabel}
             busy={controller.isBusy}
+            animateBrand={enableFullAnimation}
             i18n={i18n}
           />
           <Box ref={conversationRegionRef} width="100%" flexGrow={1} minHeight={2} overflow="hidden">

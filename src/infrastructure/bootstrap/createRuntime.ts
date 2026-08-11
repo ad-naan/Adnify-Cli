@@ -35,6 +35,7 @@ import { SkillService } from '../skills/SkillService'
 import { McpRegistry } from '../mcp/McpClient'
 import { DefaultHookRegistry } from '../hooks/DefaultHookRegistry'
 import { resolveUiPreferences } from './resolveUiPreferences'
+import { readStorageSettingsFile } from '../storage/storageSettingsFile'
 import { TsLanguageServiceIndexer } from '../indexing/TsLanguageServiceIndexer'
 import { GraphRepoMapBuilder } from '../indexing/GraphRepoMapBuilder'
 
@@ -42,10 +43,11 @@ export type { AdnifyCliRuntime }
 
 export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const logger = new ConsoleLogger()
-  const i18n = createAppI18n(resolveAppLocaleFromEnv())
-  const ui = resolveUiPreferences()
-  const config = new DefaultCliConfigAdapter()
   const storage = await resolveAppStorage()
+  const startupSettings = await readStorageSettingsFile(storage.settingsPath)
+  const i18n = createAppI18n(resolveAppLocaleFromEnv(process.env, startupSettings.locale))
+  const ui = resolveUiPreferences(process.env, startupSettings.animationLevel)
+  const config = new DefaultCliConfigAdapter()
   const storageSettings = new FileStorageSettingsAdapter()
   config.setStorage(storage)
   const sessionRepository = new FileSessionRepository(storage)

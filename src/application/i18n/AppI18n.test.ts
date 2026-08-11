@@ -18,6 +18,11 @@ describe('AppI18n', () => {
     ).toBe('en')
   })
 
+  test('should use persisted locale when no explicit environment override exists', () => {
+    expect(resolveAppLocaleFromEnv({ LANG: '' }, 'zh-CN')).toBe('zh-CN')
+    expect(resolveAppLocaleFromEnv({ ADNIFY_LOCALE: 'en' }, 'zh-CN')).toBe('en')
+  })
+
   test('should format translated templates', () => {
     const i18n = createAppI18n('en')
     expect(i18n.t('status.responseFailed', { message: 'boom' })).toBe('Response failed: boom')

@@ -55,15 +55,21 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':mode agent': 'command.desc.mode.agent',
   ':mode plan': 'command.desc.mode.plan',
   ':workspace': 'command.desc.workspace',
+  ':status': 'command.desc.status',
   ':tools': 'command.desc.tools',
+  ':doctor': 'command.desc.doctor',
+  ':diff': 'command.desc.diff',
+  ':review': 'command.desc.review',
   ':model [provider] [model]': 'command.desc.model',
   ':config': 'command.desc.config',
   ':config init': 'command.desc.configInit',
-  ':config set provider [value]': 'command.desc.config',
+  ':config set provider [value] [model]': 'command.desc.config',
   ':config set model [value]': 'command.desc.config',
   ':config set api-key [value]': 'command.desc.config',
   ':config set base-url [value]': 'command.desc.config',
   ':config clear api-key': 'command.desc.config',
+  ':language [zh-CN|en]': 'command.desc.language',
+  ':animation [off|minimal|full]': 'command.desc.animation',
   ':session': 'command.desc.session',
   ':sessions': 'command.desc.sessions',
   ':resume [index|id]': 'command.desc.resume',
@@ -72,6 +78,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':memory clear': 'command.desc.memory',
   ':checkpoint [message]': 'command.desc.checkpoint',
   ':undo': 'command.desc.undo',
+  ':restore [id|index]': 'command.desc.restore',
   ':skill [name|list]': 'command.desc.skill',
   ':mcp': 'command.desc.mcp',
   ':context': 'command.desc.context',
@@ -490,6 +497,9 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       const result = await params.runtime.useCases.submitPrompt.executeStreaming(
         { sessionId: session.id, prompt: nextInput, abortSignal: abortController.signal, memoryBlock: memoryBlock || undefined },
         {
+          onUserMessage: (acceptedSession) => {
+            setSession(acceptedSession)
+          },
           onChunk: (delta) => {
             queueStreamingChunk(delta)
           },
@@ -665,6 +675,16 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
 
     if (key.leftArrow) {
       setInputCursor((previous) => Math.max(0, previous - 1))
+      return
+    }
+
+    if (configInit.isActive && configInit.isSelectionStep && key.upArrow) {
+      configInit.moveSelection('up')
+      return
+    }
+
+    if (configInit.isActive && configInit.isSelectionStep && key.downArrow) {
+      configInit.moveSelection('down')
       return
     }
 
