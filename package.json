@@ -25,6 +25,7 @@
   "engines": {
     "bun": ">=1.3.0"
   },
+  "preferGlobal": true,
   "packageManager": "bun@1.3.6",
   "bin": {
     "adnify": "./dist/adnify-cli.js"
