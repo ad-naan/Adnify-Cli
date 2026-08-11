@@ -22,6 +22,7 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :config clear api-key
 - :language [zh-CN|en]
 - :animation [off|minimal|full]
+- :permissions [manual|workspace|auto|plan]
 - :session
 - :storage
 - :storage set [path]

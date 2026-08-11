@@ -1,4 +1,11 @@
-import { APICallError, jsonSchema, streamText, type LanguageModel, type ToolSet } from 'ai'
+import {
+  APICallError,
+  jsonSchema,
+  streamText,
+  type LanguageModel,
+  type ModelMessage as AiModelMessage,
+  type ToolSet,
+} from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
@@ -155,7 +162,7 @@ export class AiSdkGateway implements ModelGatewayPort {
     try {
       const result = streamText({
         model: this.model,
-        messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: request.messages.map(toAiModelMessage),
         temperature: request.temperature ?? this.config.temperature,
         maxOutputTokens: request.maxTokens ?? this.config.maxTokens,
         abortSignal: controller.signal,
@@ -216,6 +223,47 @@ export class AiSdkGateway implements ModelGatewayPort {
       clearTimeout(timeout)
       request.abortSignal?.removeEventListener('abort', forwardAbort)
     }
+  }
+}
+
+function toAiModelMessage(message: import('../../application/ports/ModelGatewayPort').ModelMessage): AiModelMessage {
+  if (message.role === 'tool') {
+    return {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: message.toolCallId,
+        toolName: message.toolName,
+        output: message.ok
+          ? { type: 'text', value: message.content }
+          : { type: 'error-text', value: message.content },
+      }],
+    }
+  }
+
+  if (message.role === 'assistant' && message.toolCalls?.length) {
+    return {
+      role: 'assistant',
+      content: [
+        ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+        ...message.toolCalls.map((call) => ({
+          type: 'tool-call' as const,
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          input: parseToolInput(call.input),
+        })),
+      ],
+    }
+  }
+
+  return { role: message.role, content: message.content }
+}
+
+function parseToolInput(input: string): unknown {
+  try {
+    return JSON.parse(input)
+  } catch {
+    return { raw: input }
   }
 }
 

@@ -48,13 +48,27 @@ export class ResponseCache<V = string> {
    * 取所有消息参与 hash，保证任何消息变化时 key 也变化。
    */
   static computeKey(
-    messages: ReadonlyArray<{ role: string; content: string }>,
+    messages: ReadonlyArray<{
+      role: string
+      content: string
+      toolCalls?: unknown
+      toolCallId?: string
+      toolName?: string
+      ok?: boolean
+    }>,
     model: string,
     temperature?: number,
     maxTokens?: number,
   ): string {
     const payload = JSON.stringify({
-      m: messages.map((m) => ({ r: m.role, c: m.content })),
+      m: messages.map((m) => ({
+        r: m.role,
+        c: m.content,
+        tc: m.toolCalls,
+        id: m.toolCallId,
+        tn: m.toolName,
+        ok: m.ok,
+      })),
       model,
       t: temperature ?? -1,
       mt: maxTokens ?? -1,

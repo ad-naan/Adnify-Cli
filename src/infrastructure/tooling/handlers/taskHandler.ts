@@ -32,7 +32,7 @@ function parsePriority(value: unknown): SubAgentPriority | undefined {
 }
 
 function parseRole(value: unknown): SubAgentRole | undefined {
-  return value === 'general' || value === 'explore' || value === 'review' || value === 'test'
+  return value === 'general' || value === 'explore' || value === 'review' || value === 'test' || value === 'implement'
     ? value
     : undefined
 }
@@ -118,12 +118,16 @@ export function parseTaskRequest(request: ToolExecutionRequest): ParseTaskResult
 /** 审批面板上展示派了哪些活 —— 子代理会真的去打模型 API，用户有权先看一眼。 */
 export function formatTaskPreview(parsed: ParsedTaskRequest): string {
   const lines = parsed.tasks.map((task, index) => `${index + 1}. ${task.title}`)
+  const implementationCount = parsed.tasks.filter((task) => task.role === 'implement').length
+  const isolationSummary = implementationCount > 0
+    ? `${implementationCount} implementation worker${implementationCount === 1 ? '' : 's'} will edit and verify in disposable Git worktrees; other roles remain read-only.`
+    : 'All workers use read-only workspace tools and cannot modify files or run shell commands.'
 
   return [
     `Dispatches ${parsed.tasks.length} sub-agent${parsed.tasks.length === 1 ? '' : 's'} (up to ${parsed.maxConcurrency} at a time):`,
     ...lines,
     '',
-    'Each runs in isolated context with read-only workspace tools. They cannot modify files or run shell commands.',
+    isolationSummary,
   ].join('\n')
 }
 

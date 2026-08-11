@@ -940,7 +940,7 @@ describe('ApplyCliCommandUseCase', () => {
     })
   })
 
-  test('should persist language and animation preferences', async () => {
+  test('should persist language, animation, and permission preferences', async () => {
     const repo = createMockSessionRepo()
     const session = ConversationSession.create({
       id: 'sess-preferences',
@@ -953,10 +953,13 @@ describe('ApplyCliCommandUseCase', () => {
 
     let savedLocale = ''
     let savedAnimation = ''
+    let savedPermission = ''
+    let activePermission: 'manual' | 'workspace' | 'auto' | 'plan' = 'manual'
     const storageSettings: StorageSettingsPort = {
       ...createMockStorageSettings(),
       setLocale: async (locale) => { savedLocale = locale },
       setAnimationLevel: async (level) => { savedAnimation = level },
+      setPermissionMode: async (mode) => { savedPermission = mode },
     }
     const useCase = new ApplyCliCommandUseCase(
       repo,
@@ -975,12 +978,27 @@ describe('ApplyCliCommandUseCase', () => {
     })
     await useCase.execute({
       sessionId: session.id,
+      commandLine: ':permissions auto',
+      bootstrap: createBootstrapSnapshot(),
+      permissionController: {
+        setObserver: () => {},
+        getPending: () => null,
+        resolvePending: () => false,
+        denyAllPending: () => {},
+        getMode: () => activePermission,
+        setMode: (mode) => { activePermission = mode },
+      },
+    })
+    await useCase.execute({
+      sessionId: session.id,
       commandLine: ':animation full',
       bootstrap: createBootstrapSnapshot(),
     })
 
     expect(savedLocale).toBe('zh-CN')
     expect(savedAnimation).toBe('full')
+    expect(savedPermission).toBe('auto')
+    expect(activePermission).toBe('auto')
   })
 
   test('should list available skills', async () => {

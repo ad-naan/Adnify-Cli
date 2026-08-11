@@ -113,6 +113,41 @@ describe('AiSdkGateway native tools', () => {
     expect(call?.tools?.[0]?.name).toBe('shell-runner')
   })
 
+  test('maps native call history to standard assistant and tool messages', async () => {
+    const model = new MockLanguageModelV3({
+      doStream: async () => streamOf({ text: 'done' }) as never,
+    })
+    const gateway = new AiSdkGateway(CONFIG, createLogger(), () => model as unknown as LanguageModel)
+
+    await collect(gateway.streamChat(request({
+      messages: [
+        { role: 'user', content: 'inspect' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{
+            toolCallId: 'call-history-1',
+            toolName: 'shell-runner',
+            input: '{"argv":["git","status"]}',
+          }],
+        },
+        {
+          role: 'tool',
+          content: 'clean',
+          toolCallId: 'call-history-1',
+          toolName: 'shell-runner',
+          ok: true,
+        },
+      ],
+    })))
+
+    const prompt = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    expect(prompt).toContain('call-history-1')
+    expect(prompt).toContain('tool-call')
+    expect(prompt).toContain('tool-result')
+    expect(prompt).toContain('clean')
+  })
+
   test('omits tools entirely when the caller declares none', async () => {
     const model = new MockLanguageModelV3({
       doStream: async () => streamOf({ text: 'plain' }) as never,

@@ -15,20 +15,28 @@ import {
   type SubAgentRole,
 } from '../../domain/agent/SubAgentTask'
 import type { SubAgentOrchestratorPort } from '../../domain/agent/SubAgentOrchestratorPort'
-import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import { getToolInputSchema } from '../tooling/toolInputSchemas'
 import { loadProjectInstructions } from '../prompt/loadProjectInstructions'
+import { GitWorktreeManager, type WorktreeHandle } from './GitWorktreeManager'
+import { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 
 interface LocalSubAgentOptions {
   idGenerator: IdGeneratorPort
   logger: LoggerPort
   toolExecutor?: ToolExecutorPort
+  createWorktreeToolExecutor?: () => ToolExecutorPort
+  worktreeManagerFactory?: (workspaceRoot: string) => {
+    create(taskId: string): Promise<WorktreeHandle>
+    capturePatch(handle: WorktreeHandle): Promise<{ patch: string; status: string }>
+    dispose(handle: WorktreeHandle): Promise<void>
+  }
 }
 
 const MAX_AGENT_TURNS = 8
 const MAX_TOOL_RESULT_CHARS = 6000
 const PRIORITY_SCORE: Record<SubAgentPriority, number> = { high: 0, normal: 1, low: 2 }
 const READ_ONLY_TOOL_IDS = new Set(['workspace-read', 'search-index', 'glob-search', 'file-ops'])
+const IMPLEMENT_TOOL_IDS = new Set([...READ_ONLY_TOOL_IDS, 'shell-runner'])
 
 const READ_ONLY_TOOLS: ModelToolDefinition[] = [
   {
@@ -61,11 +69,25 @@ const READ_ONLY_TOOLS: ModelToolDefinition[] = [
   },
 ]
 
+const IMPLEMENT_TOOLS: ModelToolDefinition[] = [
+  ...READ_ONLY_TOOLS.slice(0, 3),
+  {
+    name: 'file-ops',
+    description: 'Read, list, write, update, or patch text files inside this isolated worktree.',
+    inputSchema: getToolInputSchema('file-ops'),
+  },
+  {
+    name: 'shell-runner',
+    description: 'Run approved project inspection and verification commands inside this isolated worktree.',
+    inputSchema: getToolInputSchema('shell-runner'),
+  },
+]
+
 /**
  * Runs focused sub-agents in isolated contexts.
  *
- * Workers receive a restricted read-only tool set. This makes delegation useful for real code
- * research while preserving the main agent as the only place that can mutate files or run code.
+ * Research workers stay read-only. Implementation workers edit and verify inside disposable
+ * Git worktrees, then return a patch for the parent agent to review and apply.
  */
 export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
   constructor(
@@ -126,7 +148,7 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
           throw new Error('No model gateway configured for sub-agent execution')
         }
 
-        const result = await this.runFocusedAgent(task, options.workspace, options.abortSignal)
+        const result = await this.runTaskInIsolation(task, options.workspace, options.abortSignal)
         if (!result.trim()) throw new Error('Sub-agent returned empty response')
 
         task.markCompleted(result.trim())
@@ -161,18 +183,63 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
     return tasks
   }
 
-  private async runFocusedAgent(
+  private async runTaskInIsolation(
     task: SubAgentTask,
     workspace: WorkspaceContext,
     abortSignal?: AbortSignal,
   ): Promise<string> {
+    if (task.role !== 'implement' || !workspace.isGitRepository || !this.options.createWorktreeToolExecutor) {
+      return this.runFocusedAgent(task, workspace, abortSignal, this.options.toolExecutor, false)
+    }
+
+    const manager = this.options.worktreeManagerFactory?.(workspace.rootPath) ??
+      new GitWorktreeManager(workspace.rootPath, this.options.logger)
+    const handle = await manager.create(task.id)
+    const isolatedWorkspace = new WorkspaceContext({
+      rootPath: handle.path,
+      isGitRepository: true,
+      packageManager: workspace.packageManager,
+      topLevelEntries: workspace.topLevelEntries,
+    })
+
+    try {
+      const result = await this.runFocusedAgent(
+        task,
+        isolatedWorkspace,
+        abortSignal,
+        this.options.createWorktreeToolExecutor(),
+        true,
+      )
+      const captured = await manager.capturePatch(handle)
+      return [
+        result,
+        '',
+        '## Isolated worktree result',
+        `status:\n${captured.status || '(clean)'}`,
+        captured.patch ? `patch:\n${truncate(captured.patch, 8000)}` : 'patch: (none)',
+        'The parent agent must review and apply this patch to the main workspace.',
+      ].join('\n')
+    } finally {
+      await manager.dispose(handle)
+    }
+  }
+
+  private async runFocusedAgent(
+    task: SubAgentTask,
+    workspace: WorkspaceContext,
+    abortSignal?: AbortSignal,
+    toolExecutor: ToolExecutorPort | undefined = this.options.toolExecutor,
+    allowImplementation = false,
+  ): Promise<string> {
     let messages = await this.buildSubAgentMessages(task, workspace)
+    let verificationRequired = false
+    let verificationNudgeSent = false
 
     for (let turn = 0; turn < MAX_AGENT_TURNS; turn += 1) {
       const parser = new StreamingToolCallParser()
       let accumulated = ''
       let visibleText = ''
-      let nativeToolCall: { name: string; input: string } | null = null
+      let nativeToolCall: { toolCallId: string; name: string; input: string } | null = null
 
       for await (const chunk of this.gateway!.streamChat({
         messages,
@@ -180,10 +247,14 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
         temperature: 0,
         maxTokens: this.config.maxTokens,
         abortSignal,
-        tools: this.options.toolExecutor ? READ_ONLY_TOOLS : undefined,
+        tools: toolExecutor ? (allowImplementation ? IMPLEMENT_TOOLS : READ_ONLY_TOOLS) : undefined,
       })) {
         if (chunk.toolCall && !nativeToolCall) {
-          nativeToolCall = { name: chunk.toolCall.toolName, input: chunk.toolCall.input }
+          nativeToolCall = {
+            toolCallId: chunk.toolCall.toolCallId,
+            name: chunk.toolCall.toolName,
+            input: chunk.toolCall.input,
+          }
         }
         accumulated += chunk.delta
         visibleText += parser.push(chunk.delta).text
@@ -193,40 +264,84 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
       visibleText += flushed.text
       const toolCall = nativeToolCall ?? flushed.toolCall ?? parseToolCallMarkup(accumulated)
 
+      if (!toolCall && allowImplementation && verificationRequired && !verificationNudgeSent) {
+        verificationNudgeSent = true
+        messages = [
+          ...messages,
+          { role: 'assistant', content: visibleText.trim() || accumulated.trim() },
+          {
+            role: 'user',
+            content: 'You modified files in the worktree. Run the narrowest relevant test, typecheck, lint, or build before finishing.',
+          },
+        ]
+        continue
+      }
+
       if (!toolCall) return visibleText.trim() || accumulated.trim()
 
-      const result = await this.executeReadOnlyTool(toolCall.name, toolCall.input, workspace, abortSignal)
-      messages = [
-        ...messages,
-        {
-          role: 'assistant',
-          content: [visibleText.trim(), `[called ${toolCall.name} with ${toolCall.input}]`]
-            .filter(Boolean)
-            .join('\n\n'),
-        },
-        {
-          role: 'user',
-          content: [
-            `Read-only tool result for ${result.toolId}:`,
-            result.ok ? 'status: ok' : 'status: failed',
-            truncate(result.content, MAX_TOOL_RESULT_CHARS),
-            '',
-            'Continue the assigned subtask. Cite file paths and symbols in the final result.',
-          ].join('\n'),
-        },
-      ]
+      const result = await this.executeAgentTool(
+        toolCall.name,
+        toolCall.input,
+        workspace,
+        toolExecutor,
+        allowImplementation,
+        abortSignal,
+      )
+      if (result.ok && allowImplementation && isMutatingFileInput(toolCall.name, toolCall.input)) {
+        verificationRequired = true
+        verificationNudgeSent = false
+      } else if (allowImplementation && verificationRequired && isVerificationInput(toolCall.name, toolCall.input)) {
+        verificationRequired = false
+      }
+      messages = nativeToolCall
+        ? [
+            ...messages,
+            {
+              role: 'assistant',
+              content: visibleText.trim(),
+              toolCalls: [{
+                toolCallId: nativeToolCall.toolCallId,
+                toolName: nativeToolCall.name,
+                input: nativeToolCall.input,
+              }],
+            },
+            {
+              role: 'tool',
+              content: truncate(result.content, MAX_TOOL_RESULT_CHARS),
+              toolCallId: nativeToolCall.toolCallId,
+              toolName: nativeToolCall.name,
+              ok: result.ok,
+            },
+          ]
+        : [
+            ...messages,
+            { role: 'assistant', content: visibleText.trim() || accumulated.trim() },
+            {
+              role: 'user',
+              content: [
+                `Read-only tool result for ${result.toolId}:`,
+                result.ok ? 'status: ok' : 'status: failed',
+                truncate(result.content, MAX_TOOL_RESULT_CHARS),
+                '',
+                'Continue the assigned subtask. Cite file paths and symbols in the final result.',
+              ].join('\n'),
+            },
+          ]
     }
 
-    throw new Error(`Sub-agent reached the ${MAX_AGENT_TURNS}-turn read-only tool limit`)
+    throw new Error(`Sub-agent reached the ${MAX_AGENT_TURNS}-turn tool limit`)
   }
 
-  private async executeReadOnlyTool(
+  private async executeAgentTool(
     toolName: string,
     input: string,
     workspace: WorkspaceContext,
+    toolExecutor: ToolExecutorPort | undefined,
+    allowImplementation: boolean,
     abortSignal?: AbortSignal,
   ): Promise<ToolExecutionResult> {
-    if (!this.options.toolExecutor || !READ_ONLY_TOOL_IDS.has(toolName)) {
+    const allowedTools = allowImplementation ? IMPLEMENT_TOOL_IDS : READ_ONLY_TOOL_IDS
+    if (!toolExecutor || !allowedTools.has(toolName)) {
       return { toolId: toolName, ok: false, content: `Tool "${toolName}" is not available to sub-agents.` }
     }
 
@@ -234,7 +349,7 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
       try {
         const parsed = JSON.parse(input) as { action?: unknown }
         const action = parsed.action ?? 'read'
-        if (action !== 'read' && action !== 'list') {
+        if (!allowImplementation && action !== 'read' && action !== 'list') {
           return {
             toolId: toolName,
             ok: false,
@@ -246,7 +361,7 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
       }
     }
 
-    return this.options.toolExecutor.execute({ toolId: toolName, input, workspace, abortSignal })
+    return toolExecutor.execute({ toolId: toolName, input, workspace, abortSignal })
   }
 
   private async buildSubAgentMessages(task: SubAgentTask, workspace: WorkspaceContext): Promise<ModelMessage[]> {
@@ -255,12 +370,17 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
       explore: 'Map the relevant implementation, dependencies, and control flow before concluding.',
       review: 'Look for correctness, security, regression, and maintainability risks. Rank concrete findings.',
       test: 'Identify missing coverage, failure modes, and the smallest meaningful verification strategy.',
+      implement: 'Implement the assigned change in your isolated git worktree and run the narrowest relevant verification.',
     }
 
     const systemLines = [
-      'You are an isolated read-only coding sub-agent.',
+      task.role === 'implement'
+        ? 'You are an isolated implementation worker. All writes stay inside a disposable git worktree.'
+        : 'You are an isolated read-only coding sub-agent.',
       roleInstruction[task.role],
-      'You may search and read the workspace, but you cannot modify files, run shell commands, browse the web, or spawn agents.',
+      task.role === 'implement'
+        ? 'You may read and edit worktree files and run allowlisted verification commands. You cannot browse the web or spawn agents.'
+        : 'You may search and read the workspace, but you cannot modify files, run shell commands, browse the web, or spawn agents.',
       'Use tools when evidence is not already present. Do not guess about repository code.',
       'Final output must include: conclusion, evidence with file paths/symbols, risks or unknowns, and a recommended next action.',
       'Do not ask the user questions. Return a compact result for a parent coding agent.',
@@ -269,7 +389,9 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
       '',
       'If native tools are unavailable, request exactly one tool with:',
       '<adnify_tool_call name="tool-id">{"key":"value"}</adnify_tool_call>',
-      'Allowed tool ids: workspace-read, search-index, glob-search, file-ops (read/list only).',
+      task.role === 'implement'
+        ? 'Allowed tool ids: workspace-read, search-index, glob-search, file-ops, shell-runner.'
+        : 'Allowed tool ids: workspace-read, search-index, glob-search, file-ops (read/list only).',
     ]
 
     if (task.contextSummary) systemLines.push(`Context: ${task.contextSummary}`)
@@ -288,4 +410,24 @@ export class LocalSubAgentOrchestrator implements SubAgentOrchestratorPort {
 function truncate(content: string, maxLength: number): string {
   if (content.length <= maxLength) return content
   return `${content.slice(0, maxLength)}\n\n[truncated ${content.length - maxLength} characters]`
+}
+
+function isMutatingFileInput(toolName: string, input: string): boolean {
+  if (toolName !== 'file-ops') return false
+  try {
+    const action = (JSON.parse(input) as { action?: unknown }).action
+    return action === 'write' || action === 'update' || action === 'patch'
+  } catch {
+    return false
+  }
+}
+
+function isVerificationInput(toolName: string, input: string): boolean {
+  if (toolName !== 'shell-runner') return false
+  try {
+    const argv = (JSON.parse(input) as { argv?: unknown }).argv
+    return Array.isArray(argv) && /\b(test|typecheck|lint|build|check|tsc|eslint|vitest|jest)\b/i.test(argv.join(' '))
+  } catch {
+    return false
+  }
 }

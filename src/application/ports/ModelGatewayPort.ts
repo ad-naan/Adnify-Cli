@@ -1,10 +1,3 @@
-import type { MessageRole } from '../../domain/session/value-objects/MessageRole'
-
-export interface ModelMessage {
-  role: MessageRole
-  content: string
-}
-
 /** 模型发起的一次结构化工具调用。 */
 export interface ModelToolCall {
   toolCallId: string
@@ -17,6 +10,21 @@ export interface ModelToolCall {
    */
   input: string
 }
+
+/**
+ * Provider-neutral model history.
+ * Native tool calls/results retain their ids so gateways can emit standard tool-role messages.
+ */
+export type ModelMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content: string; toolCalls?: ModelToolCall[] }
+  | {
+      role: 'tool'
+      content: string
+      toolCallId: string
+      toolName: string
+      ok: boolean
+    }
 
 /** 暴露给模型的工具定义，`inputSchema` 为标准 JSON Schema。 */
 export interface ModelToolDefinition {

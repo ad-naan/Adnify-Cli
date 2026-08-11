@@ -13,6 +13,8 @@ import type { LoggerPort } from '../ports/LoggerPort'
 import type { ModelConfigStorePort } from '../ports/ModelConfigStorePort'
 import type { SessionRepositoryPort } from '../ports/SessionRepositoryPort'
 import type { StorageSettingsPort } from '../ports/StorageSettingsPort'
+import type { ToolApprovalController } from '../ports/ToolApprovalPort'
+import type { PermissionMode } from '../dto/UiPreferences'
 import type { ModelConfig, ModelProvider } from '../../domain/assistant/value-objects/ModelConfig'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -44,6 +46,7 @@ export interface ApplyCliCommandCommand {
   skillStore?: SkillStoreLike
   mcpServerList?: string[]
   checkpointStore?: CheckpointStoreLike
+  permissionController?: ToolApprovalController
 }
 
 export interface MemoryStoreLike {
@@ -726,6 +729,39 @@ export class ApplyCliCommandUseCase {
           title: this.i18n.t('transcript.config'),
           tone: 'success',
         })
+        return persist(message)
+      }
+
+      case 'permissions':
+      case 'permission': {
+        addCommandInput()
+        const requested = args[0]?.toLowerCase()
+        const modes: PermissionMode[] = ['manual', 'workspace', 'auto', 'plan']
+
+        if (!requested) {
+          const current = command.permissionController?.getMode() ?? 'workspace'
+          const message = [
+            this.i18n.t('cli.permissions.current', { value: current }),
+            this.i18n.t('cli.permissions.usage'),
+          ].join('\n')
+          addCommandOutput(message, { title: this.i18n.t('transcript.config'), tone: 'info' })
+          return persist(message)
+        }
+
+        if (!modes.includes(requested as PermissionMode)) {
+          const message = this.i18n.t('cli.permissions.invalid', { value: requested })
+          addCommandOutput(message, { title: this.i18n.t('transcript.config'), tone: 'warning' })
+          return persist(message)
+        }
+
+        const mode = requested as PermissionMode
+        if (!this.storageSettings.setPermissionMode || !command.permissionController) {
+          throw new Error('Permission settings are unavailable in this runtime')
+        }
+        await this.storageSettings.setPermissionMode(mode)
+        command.permissionController.setMode(mode)
+        const message = this.i18n.t('cli.permissions.saved', { value: mode })
+        addCommandOutput(message, { title: this.i18n.t('transcript.config'), tone: 'success' })
         return persist(message)
       }
 

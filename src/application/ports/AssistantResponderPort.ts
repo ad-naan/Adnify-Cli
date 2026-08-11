@@ -19,6 +19,7 @@ export interface AssistantStreamChunk {
   delta: string
   transcript?: string
   approval?: PendingToolApproval
+  workflowPhase?: 'plan' | 'execute'
   done: boolean
 }
 

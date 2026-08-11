@@ -14,6 +14,7 @@ import type { CreateSessionUseCase } from '../use-cases/CreateSessionUseCase'
 import type { ListSessionsUseCase } from '../use-cases/ListSessionsUseCase'
 import type { ResolveStartupSessionUseCase } from '../use-cases/ResolveStartupSessionUseCase'
 import type { SubmitPromptUseCase } from '../use-cases/SubmitPromptUseCase'
+import type { UserInteractionController } from '../ports/UserInteractionPort'
 
 export interface AdnifyCliRuntime {
   i18n: AppI18n
@@ -30,6 +31,7 @@ export interface AdnifyCliRuntime {
   applyModelConfig: (config: ModelConfig) => ModelConfig
   /** 高风险工具的待决审批队列，由终端层驱动。 */
   toolApproval: ToolApprovalController
+  userInteraction: UserInteractionController
   /** 跨会话项目记忆存储 */
   memoryStore?: MemoryStoreLike | null
   /** Skill 存储 — 用于 :skill 命令 */

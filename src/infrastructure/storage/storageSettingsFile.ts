@@ -5,6 +5,7 @@ export interface StorageSettingsFile {
   dataDirectory?: string
   locale?: 'zh-CN' | 'en'
   animationLevel?: 'off' | 'minimal' | 'full'
+  permissionMode?: 'manual' | 'workspace' | 'auto' | 'plan'
 }
 
 export async function readStorageSettingsFile(path: string): Promise<StorageSettingsFile> {

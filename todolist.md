@@ -65,6 +65,18 @@
 - [x] 新增 `task` 工具：并行派发子代理，接入审批与进度回传
 - [x] 子代理开放受限只读工具（搜索、目录、文件读取），支持专职角色、优先级调度和取消
 - [x] 自动加载 `.adnify/instructions.md`、`AGENTS.md` 与 `.rules/*.md` 项目指令
+- [x] 原生工具调用使用标准 assistant/tool 角色与 `toolCallId` 回填；文本协议仅作为兼容回退
+- [x] 成功修改文件后强制进入验证闭环，结束前至少尝试测试、类型检查、lint 或构建
+- [x] 子代理新增 `implement` 专职角色，输出可由主代理统一审批、落盘和验证的精确实现方案
+- [x] 文件检查点关联 session/tool/input 执行来源，恢复记录可追踪
+- [x] 新增 `bun run eval:agent` coding-agent 确定性评测基线与 live-model 评分表
+- [x] 审批决策升级为 allow/ask/deny，支持 manual/workspace/auto/plan 权限模式
+- [x] 保护路径和工作区外绝对路径永不静默放行，越界访问进入明确审批
+- [x] 设置、审批、权限与模型提问统一使用底部 ChoiceTabs 方向键交互
+- [x] 新增 `ask-user` 多步选项卡工具，结构化答案回填 Agent 工具链
+- [x] 新增 AI 自适应 plan→execute 工作阶段，规划阶段由宿主强制只读
+- [x] 新增 `runtime-control`，AI 可按风险自主操作模式、语言、动效、权限和已配置模型
+- [x] `implement` 子代理使用 disposable git worktree 修改和验证，结束后回传 patch
 - [x] 文件级检查点（`:restore`），独立于 git 检查点
 - [x] 写入 diff 预览与命令风险展开
 - [x] 工具执行超时改为可暂停的 deadline，审批等待不再计入耗时
@@ -74,7 +86,6 @@
 - [ ] 考虑把 `file-ops` 进一步扩展为更结构化的 patch 方案
 - [ ] 继续提升模型选择工具与组合工具的稳定性
 - [ ] 子代理仍不能执行测试或修改文件；未来若增加写入型 worker，需先设计独立工作树和审批汇合点
-- [ ] 会话历史仍用 assistant/user 两种角色回填工具调用，尚未引入真正的 tool 角色消息
 - [ ] 补更完整的产品化 README 展示内容与截图
 
 ---

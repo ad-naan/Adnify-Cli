@@ -36,17 +36,39 @@ describe('PendingToolApprovalAdapter', () => {
     expect(seen).toEqual([null, 'write src/a.ts', null])
   })
 
-  it('skips the prompt for tools approved for the whole session', async () => {
+  it('skips the prompt for the same scoped operation approved for the whole session', async () => {
     const adapter = new PendingToolApprovalAdapter()
     const first = adapter.requestApproval(createIntent())
     adapter.resolvePending('always-approved')
     expect(await first).toBe('always-approved')
 
     // 第二次不再进入队列，直接返回批准。
-    expect(await adapter.requestApproval(createIntent({ summary: 'write src/b.ts' }))).toBe(
-      'approved',
-    )
+    expect(await adapter.requestApproval(createIntent())).toBe('approved')
     expect(adapter.getPending()).toBeNull()
+  })
+
+  it('does not let an always-allow rule leak to another file', async () => {
+    const adapter = new PendingToolApprovalAdapter()
+    const first = adapter.requestApproval(createIntent({ kind: 'write', scope: 'workspace' }))
+    adapter.resolvePending('always-approved')
+    await first
+
+    const other = adapter.requestApproval(createIntent({
+      summary: 'write src/b.ts',
+      targetPath: 'src/b.ts',
+      kind: 'write',
+      scope: 'workspace',
+    }))
+    expect(adapter.getPending()?.targetPath).toBe('src/b.ts')
+    adapter.resolvePending('denied')
+    expect(await other).toBe('denied')
+  })
+
+  it('switches permission mode immediately', () => {
+    const adapter = new PendingToolApprovalAdapter('manual')
+    expect(adapter.getMode()).toBe('manual')
+    adapter.setMode('auto')
+    expect(adapter.getMode()).toBe('auto')
   })
 
   it('does not leak the allow-list across different tools', async () => {

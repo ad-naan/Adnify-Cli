@@ -55,8 +55,8 @@ export function App(props: AppProps) {
   const [totalViewportRows, setTotalViewportRows] = useState(0)
 
   useEffect(() => {
-    if (controller.toolApprovalPrompt || controller.configInitPrompt) setIsTranscriptView(false)
-  }, [controller.configInitPrompt, controller.toolApprovalPrompt])
+    if (controller.toolApprovalPrompt || controller.userInteractionPrompt || controller.configInitPrompt) setIsTranscriptView(false)
+  }, [controller.configInitPrompt, controller.toolApprovalPrompt, controller.userInteractionPrompt])
 
   // Ink 7 measures the actual flex child after every layout pass. No guessed header/input row counts.
   const conversationViewportRows = conversationMetrics.hasMeasured
@@ -165,6 +165,7 @@ export function App(props: AppProps) {
           <ConversationViewport
             messages={messages}
             streamingText={controller.streamingText}
+            busy={controller.isBusy}
             viewportRows={conversationViewportRows}
             scrollOffset={scroll.offset}
             onTotalRowsChange={setTotalViewportRows}
@@ -213,6 +214,7 @@ export function App(props: AppProps) {
             <ConversationViewport
               messages={messages}
               streamingText={controller.streamingText}
+              busy={controller.isBusy}
               viewportRows={conversationViewportRows}
               scrollOffset={scroll.offset}
               onTotalRowsChange={setTotalViewportRows}
@@ -234,9 +236,12 @@ export function App(props: AppProps) {
             modelLabel={modelLabel}
             configInitPrompt={controller.configInitPrompt}
             toolApprovalPrompt={controller.toolApprovalPrompt}
+            userInteractionPrompt={controller.userInteractionPrompt}
             commandSuggestions={controller.commandSuggestions}
             selectedSuggestionIndex={controller.selectedSuggestionIndex}
             isSuggestionOpen={controller.isSuggestionOpen}
+            choiceItems={controller.choiceItems}
+            selectedChoiceIndex={controller.selectedChoiceIndex}
             i18n={i18n}
           />
           <StatusDock

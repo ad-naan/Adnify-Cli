@@ -47,10 +47,17 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 
 ### Core Capabilities
 
+- **Immediate Activity Feedback** — Your message and working indicator render before memory lookup or the first API response
 - **Streaming Responses** — Real-time output with stable, low-jitter terminal rendering
 - **Session Persistence** — Per-workspace session files, auto-restore on startup — never lose context when closing the terminal
 - **Closed-Loop Tool Calling** — 8 built-in tools + dynamic MCP tools, with progress and results streaming back in real time
-- **Parallel Research Sub-agents** — `explore`, `review`, `test`, and `general` roles with isolated context and restricted read-only code tools
+- **Parallel Coding Sub-agents** — research roles stay read-only; `implement` workers edit and verify in disposable detached Git worktrees and return reviewable patches
+- **Keyboard Choice Flows** — approvals, setup, permission modes, and model questions use reusable arrow-key tabs instead of numeric or y/n input
+- **Interactive Agent Questions** — `ask-user` supports one-to-three-step choice flows and returns structured answers to the tool loop
+- **Adaptive Workflow Phases** — the model can enter a host-enforced read-only planning phase for complex work, then resume execution under the user's permission policy
+- **AI Runtime Control** — the agent can inspect and adjust assistant mode, permission mode, language, animation, and configured models; capability increases still require keyboard approval
+- **Permission Modes** — `manual`, `workspace`, `auto`, and `plan`, with protected-path and out-of-workspace boundaries
+- **Verified Coding Loop** — Successful file edits trigger a required test, typecheck, lint, or build attempt before completion
 - **Automatic Project Instructions** — Loads `.adnify/instructions.md`, `AGENTS.md`, and ordered `.rules/*.md`
 - **Risk-Tiered Approval** — Pauses before file writes and command execution — the model doesn't decide, you do
 - **Cross-Session Memory** — `:memory` stores project knowledge, auto-injected into future sessions
@@ -71,6 +78,7 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 | `PgUp / PgDn` | Scroll long conversations one viewport at a time |
 | `Esc` | Abort active work; return to bottom while browsing; exit transcript when at bottom |
 | `Tab / Enter` | Fill in command from the panel without executing |
+| `← / → / ↑ / ↓` | Move between bottom-dock choice tabs |
 
 - Regular conversations show compact tool summaries; full inputs, outputs, and elapsed time available in fullscreen transcript
 - Approval and configuration prompts automatically exit transcript mode to keep critical actions visible
@@ -103,7 +111,7 @@ File writes and verification commands are not decided by the model alone. Execut
 | `n` | Reject; rejection reason is returned to the model to adjust its approach |
 | `a` | Always allow this tool within the current session |
 
-> `allowWrite: true` in tool descriptions is merely a self-declaration by the model — the model can bypass it with a few extra keystrokes. The true permission boundary must rest on user keystrokes.
+> `allowWrite: true` in tool descriptions is merely a self-declaration by the model. The real boundary is the host-side policy: scope-aware permission modes, explicit approval for high-risk or out-of-workspace actions, and hard denial in plan mode.
 
 ---
 
@@ -139,6 +147,9 @@ bun run build
 # Test
 bun test
 
+# Deterministic coding-agent regression baseline
+bun run eval:agent
+
 # Verify (tests + type check + build)
 bun run verify
 ```
@@ -171,6 +182,7 @@ bun run verify
 :config clear api-key
 :language <zh-CN|en>
 :animation <off|minimal|full>
+:permissions [manual|workspace|auto|plan]
 ```
 
 `:config init` enters a temporary setup panel. Provider and model choices support Up/Down, Enter, and numeric shortcuts. Setup prompts are not written into the conversation.
@@ -200,7 +212,7 @@ Adnify-Cli/
     └── <workspace>.json
 ```
 
-File-level write snapshots are stored in `.adnify/checkpoints/` within the workspace and do not require Git.
+File-level write snapshots are stored in `.adnify/checkpoints/` within the workspace and do not require Git. Each snapshot records the originating session, tool, and tool input so recovery points remain traceable to the agent execution that created them.
 
 ### Custom Data Directory
 

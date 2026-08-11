@@ -1,4 +1,4 @@
-import { extname, resolve } from 'node:path'
+import { extname, isAbsolute, resolve } from 'node:path'
 
 export const MAX_FILE_READ_CHARS = 50_000
 export const MAX_FILE_WRITE_CHARS = 200_000
@@ -123,6 +123,23 @@ export function resolveWorkspacePath(rootPath: string, candidatePath: string): s
   return nextPath.startsWith(`${workspaceRoot}\\`) || nextPath.startsWith(`${workspaceRoot}/`)
     ? nextPath
     : null
+}
+
+export function resolveFileToolPath(
+  rootPath: string,
+  candidatePath: string,
+): { resolvedPath: string; scope: 'workspace' | 'outside' } | null {
+  if (!isAbsolute(candidatePath)) {
+    const resolvedPath = resolveWorkspacePath(rootPath, candidatePath)
+    return resolvedPath ? { resolvedPath, scope: 'workspace' } : null
+  }
+
+  const resolvedPath = resolve(candidatePath)
+  const workspaceRoot = resolve(rootPath)
+  const inside = resolvedPath === workspaceRoot ||
+    resolvedPath.startsWith(`${workspaceRoot}\\`) ||
+    resolvedPath.startsWith(`${workspaceRoot}/`)
+  return { resolvedPath, scope: inside ? 'workspace' : 'outside' }
 }
 
 /** 当前构建只允许改文本类文件，避免误写二进制内容。 */

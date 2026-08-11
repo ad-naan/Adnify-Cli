@@ -15,6 +15,8 @@ import { ActivityPulse } from './ActivityPulse'
 export interface ConversationViewportProps {
   messages: ConversationMessage[]
   streamingText?: string
+  /** Shows an execution row immediately after the user message, before the first API token. */
+  busy?: boolean
   viewportRows: number
   /** 距底部的行数偏移，0 表示跟随最新内容。 */
   scrollOffset?: number
@@ -307,22 +309,25 @@ function buildStreamingRows(
   streamingText: string,
   i18n: AppI18n,
   contentWidth: number,
+  busy: boolean,
 ): ViewportRow[] {
-  if (!streamingText) return []
+  if (!streamingText && !busy) return []
 
   const rows: ViewportRow[] = []
   rows.push({
     kind: 'streaming-header',
     key: 'streaming-header',
-    label: i18n.t('conversation.thinking'),
+    label: streamingText ? i18n.t('conversation.thinking') : i18n.t('conversation.working'),
   })
-  appendWrappedRows(rows, {
-    keyPrefix: 'streaming-body',
-    content: streamingText,
-    contentColor: adnifyTheme.textPrimary,
-    contentWidth,
-    indent: 2,
-  })
+  if (streamingText) {
+    appendWrappedRows(rows, {
+      keyPrefix: 'streaming-body',
+      content: streamingText,
+      contentColor: adnifyTheme.textPrimary,
+      contentWidth,
+      indent: 2,
+    })
+  }
   return rows
 }
 
@@ -432,14 +437,14 @@ export const ConversationViewport = memo(function ConversationViewport(
       props.messages,
       props.i18n,
       contentWidth,
-      Boolean(props.streamingText),
+      Boolean(props.streamingText || props.busy),
       Boolean(props.expandedDetails),
     ),
-    [contentWidth, props.expandedDetails, props.i18n, props.messages, props.streamingText],
+    [contentWidth, props.busy, props.expandedDetails, props.i18n, props.messages, props.streamingText],
   )
   const streamingRows = useMemo(
-    () => buildStreamingRows(props.streamingText ?? '', props.i18n, contentWidth),
-    [contentWidth, props.i18n, props.streamingText],
+    () => buildStreamingRows(props.streamingText ?? '', props.i18n, contentWidth, Boolean(props.busy)),
+    [contentWidth, props.busy, props.i18n, props.streamingText],
   )
   const viewportRows = useMemo(
     () => [...messageRows, ...streamingRows],

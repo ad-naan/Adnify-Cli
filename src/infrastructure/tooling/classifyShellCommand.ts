@@ -197,11 +197,19 @@ function classifyGitCommand(
     if (!action || action === 'list') {
       return { ok: true, riskLevel: 'safe', summary, effect: readOnly('List stash entries') }
     }
-    return { ok: true, riskLevel: 'careful', summary, effect: describeGitEffect('stash', argv) }
+    const riskLevel = action === 'drop' || action === 'clear' ? 'dangerous' : 'careful'
+    return { ok: true, riskLevel, summary, effect: describeGitEffect('stash', argv) }
   }
 
   if (CAREFUL_GIT_SUBCOMMANDS.has(subcommand)) {
-    return { ok: true, riskLevel: 'careful', summary, effect: describeGitEffect(subcommand, argv) }
+    const flags = argv.slice(2).map((arg) => arg.toLowerCase())
+    const riskLevel = subcommand === 'checkout' ||
+      subcommand === 'restore' ||
+      subcommand === 'reset' ||
+      (subcommand === 'commit' && flags.includes('--amend'))
+      ? 'dangerous'
+      : 'careful'
+    return { ok: true, riskLevel, summary, effect: describeGitEffect(subcommand, argv) }
   }
 
   return {
@@ -271,7 +279,7 @@ function classifyBunCommand(
 
     return {
       ok: true,
-      riskLevel: 'careful',
+      riskLevel: 'dangerous',
       summary,
       effect: {
         action: `Run ${binary}`,
@@ -320,11 +328,11 @@ function classifyNpmLikeCommand(
 ): ShellCommandClassification {
   const subcommand = argv[1]?.toLowerCase()
 
-  // npm/pnpm/yarn install / ci → careful (modifies node_modules)
+  // Dependency installation downloads and executes third-party code.
   if (subcommand === 'install' || subcommand === 'ci' || subcommand === 'i' || subcommand === 'add') {
     return {
       ok: true,
-      riskLevel: 'careful',
+      riskLevel: 'dangerous',
       summary,
       effect: {
         action: 'Install dependencies',
@@ -375,7 +383,7 @@ function classifyNpmLikeCommand(
     if (!pkg || !ALLOWED_NPX_PACKAGES.has(pkg)) {
       return { ok: false, reason: `${command} exec ${pkg ?? '(missing)'} is not allowed. Allowed: ${[...ALLOWED_NPX_PACKAGES].join(', ')}.` }
     }
-    return { ok: true, riskLevel: 'careful', summary, effect: describePackageRunnerEffect(pkg) }
+    return { ok: true, riskLevel: 'dangerous', summary, effect: describePackageRunnerEffect(pkg) }
   }
 
   // yarn without subcommand (yarn <script> shorthand)
@@ -418,5 +426,5 @@ function classifyNpxCommand(
   if (!pkg || !ALLOWED_NPX_PACKAGES.has(pkg)) {
     return { ok: false, reason: `npx ${pkg ?? '(missing)'} is not allowed. Allowed: ${[...ALLOWED_NPX_PACKAGES].join(', ')}.` }
   }
-  return { ok: true, riskLevel: 'careful', summary, effect: describePackageRunnerEffect(pkg) }
+  return { ok: true, riskLevel: 'dangerous', summary, effect: describePackageRunnerEffect(pkg) }
 }

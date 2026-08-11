@@ -11,7 +11,7 @@ import {
   type ResolveAppStorageOptions,
 } from './resolveAppStorage'
 import { readStorageSettingsFile, writeStorageSettingsFile } from './storageSettingsFile'
-import type { AnimationLevel } from '../../application/dto/UiPreferences'
+import type { AnimationLevel, PermissionMode } from '../../application/dto/UiPreferences'
 import type { AppLocale } from '../../application/i18n/AppI18n'
 
 const CONFIG_FILE = 'config.json'
@@ -86,6 +86,12 @@ export class FileStorageSettingsAdapter implements StorageSettingsPort {
     const storage = await resolveAppStorage(this.options)
     const settings = await readStorageSettingsFile(storage.settingsPath)
     await writeStorageSettingsFile(storage.settingsPath, { ...settings, animationLevel })
+  }
+
+  async setPermissionMode(permissionMode: PermissionMode): Promise<void> {
+    const storage = await resolveAppStorage(this.options)
+    const settings = await readStorageSettingsFile(storage.settingsPath)
+    await writeStorageSettingsFile(storage.settingsPath, { ...settings, permissionMode })
   }
 }
 

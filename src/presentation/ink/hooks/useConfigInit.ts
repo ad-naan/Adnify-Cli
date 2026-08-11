@@ -4,6 +4,7 @@ import type { ModelConfig } from '../../../domain/assistant/value-objects/ModelC
 import { PROVIDER_PRESETS, type ProviderPreset } from '../../../infrastructure/config/providerPresets'
 import { writeModelConfig } from '../../../infrastructure/config/writeLocalConfig'
 import { resolveAppStorage } from '../../../infrastructure/storage/resolveAppStorage'
+import type { ChoiceTabItem } from '../components/ChoiceTabs'
 
 type InitStep =
   | 'idle'
@@ -24,6 +25,9 @@ export interface ConfigInitState {
   handleInput: (input: string) => Promise<ConfigInitResult | null>
   moveSelection: (direction: 'up' | 'down') => void
   isSelectionStep: boolean
+  choiceItems: ChoiceTabItem[]
+  selectedChoiceIndex: number
+  confirmSelection: () => Promise<ConfigInitResult | null>
 }
 
 export interface ConfigInitResult {
@@ -56,14 +60,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
   const buildPromptText = useCallback((): string => {
     switch (step) {
       case 'select-provider': {
-        const lines = [i18n.t('config.selectProviderTitle')]
-        PROVIDER_PRESETS.forEach((preset, index) => {
-          lines.push(`${index === selectedIndex ? '›' : ' '} ${index + 1}. ${preset.label} (${preset.models.slice(0, 3).join(' / ')})`)
-        })
-        lines.push(`${selectedIndex === PROVIDER_PRESETS.length ? '›' : ' '} ${PROVIDER_PRESETS.length + 1}. ${i18n.t('config.customProvider')}`)
-        lines.push('')
-        lines.push(i18n.t('config.enterIndexContinue'))
-        return lines.join('\n')
+        return i18n.t('config.selectProviderTitle')
       }
 
       case 'select-model': {
@@ -72,14 +69,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
           return i18n.t('config.selectModelInstruction')
         }
 
-        const lines = [i18n.t('config.selectModelTitle', { provider: preset.label })]
-        preset.models.forEach((model, index) => {
-          const isDefault = model === preset.defaultModel ? i18n.t('config.defaultSuffix') : ''
-          lines.push(`${index === selectedIndex ? '›' : ' '} ${index + 1}. ${model}${isDefault}`)
-        })
-        lines.push('')
-        lines.push(i18n.t('config.selectModelInstruction'))
-        return lines.join('\n')
+        return i18n.t('config.selectModelTitle', { provider: preset.label })
       }
 
       case 'enter-apikey':
@@ -209,7 +199,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
         }
 
         chosen.current.apiKey = trimmed
-
+        setSelectedIndex(0)
         setStep('confirm')
         return null
       }
@@ -264,7 +254,9 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
       ? PROVIDER_PRESETS.length + 1
       : step === 'select-model'
         ? chosen.current.preset?.models.length ?? 0
-        : 0
+        : step === 'confirm'
+          ? 2
+          : 0
 
     if (itemCount <= 0) return
     setErrorText('')
@@ -275,6 +267,37 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
     )
   }, [step])
 
+  const choiceItems: ChoiceTabItem[] = step === 'select-provider'
+    ? [
+        ...PROVIDER_PRESETS.map((preset) => ({
+          id: preset.provider,
+          label: preset.label,
+          description: preset.defaultModel,
+        })),
+        { id: 'custom', label: i18n.t('config.customProvider') },
+      ]
+    : step === 'select-model'
+      ? (chosen.current.preset?.models ?? []).map((model) => ({
+          id: model,
+          label: model,
+          description: model === chosen.current.preset?.defaultModel
+            ? i18n.t('config.defaultSuffix').trim()
+            : undefined,
+        }))
+      : step === 'confirm'
+        ? [
+            { id: 'yes', label: i18n.t('approval.choice.approve') },
+            { id: 'no', label: i18n.t('approval.choice.deny') },
+          ]
+        : []
+
+  const confirmSelection = useCallback(() => {
+    if (step === 'confirm') {
+      return handleInput(selectedIndex === 0 ? 'y' : 'n')
+    }
+    return handleInput('')
+  }, [handleInput, selectedIndex, step])
+
   return {
     isActive: step !== 'idle' && step !== 'done',
     promptText: buildPromptText(),
@@ -283,6 +306,9 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
     stop,
     handleInput,
     moveSelection,
-    isSelectionStep: step === 'select-provider' || step === 'select-model',
+    isSelectionStep: step === 'select-provider' || step === 'select-model' || step === 'confirm',
+    choiceItems,
+    selectedChoiceIndex: selectedIndex,
+    confirmSelection,
   }
 }

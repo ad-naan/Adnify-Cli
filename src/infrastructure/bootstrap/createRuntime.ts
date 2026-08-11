@@ -38,6 +38,7 @@ import { resolveUiPreferences } from './resolveUiPreferences'
 import { readStorageSettingsFile } from '../storage/storageSettingsFile'
 import { TsLanguageServiceIndexer } from '../indexing/TsLanguageServiceIndexer'
 import { GraphRepoMapBuilder } from '../indexing/GraphRepoMapBuilder'
+import { PendingUserInteractionAdapter } from '../tooling/PendingUserInteractionAdapter'
 
 export type { AdnifyCliRuntime }
 
@@ -46,7 +47,11 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const storage = await resolveAppStorage()
   const startupSettings = await readStorageSettingsFile(storage.settingsPath)
   const i18n = createAppI18n(resolveAppLocaleFromEnv(process.env, startupSettings.locale))
-  const ui = resolveUiPreferences(process.env, startupSettings.animationLevel)
+  const ui = resolveUiPreferences(
+    process.env,
+    startupSettings.animationLevel,
+    startupSettings.permissionMode,
+  )
   const config = new DefaultCliConfigAdapter()
   const storageSettings = new FileStorageSettingsAdapter()
   config.setStorage(storage)
@@ -54,7 +59,8 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const idGenerator = new CryptoIdGenerator()
   const clock = new SystemClock()
   const workspaceContextService = new LocalWorkspaceContextService()
-  const toolApproval = new PendingToolApprovalAdapter()
+  const toolApproval = new PendingToolApprovalAdapter(ui.permissionMode)
+  const userInteraction = new PendingUserInteractionAdapter()
   const hookRegistry = new DefaultHookRegistry(logger)
 
   const skillRepository = new FsSkillRepository({
@@ -95,6 +101,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   // File-level checkpoints — snapshots each approved file-ops write so `:restore` can revert it.
   // Independent of the git-based `:checkpoint`/`:undo` pair: works even outside a git repository.
   const checkpointManager = new CheckpointManager(process.cwd(), logger)
+  let switchModelForRuntime: (provider: string, model?: string) => { provider: string; model: string } | null = () => null
 
   // Recreate tool executor with MCP registry support
   //
@@ -113,7 +120,45 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
         idGenerator,
         logger,
         toolExecutor,
+        createWorktreeToolExecutor: () => new LocalToolExecutor(
+          { requestApproval: async () => 'denied' },
+          undefined,
+          undefined,
+          undefined,
+          () => 'workspace',
+        ),
       })
+    },
+    () => toolApproval.getMode(),
+    userInteraction,
+    {
+      inspect: () => {
+        const active = config.getModelConfig()
+        const configuredProviders = Object.entries(config.getProviders()).map(([name, provider]) => ({
+          name,
+          type: provider.provider,
+          models: provider.models,
+        }))
+        return JSON.stringify({
+          activeModel: { provider: active.provider, model: active.model },
+          configuredProviders,
+          animationLevel: ui.animationLevel,
+        }, null, 2)
+      },
+      getPermissionMode: () => toolApproval.getMode(),
+      setPermissionMode: async (mode) => {
+        await storageSettings.setPermissionMode(mode)
+        toolApproval.setMode(mode)
+        ui.permissionMode = mode
+      },
+      setAnimationLevel: async (level) => {
+        await storageSettings.setAnimationLevel(level)
+        ui.animationLevel = level
+      },
+      setLocale: async (locale) => {
+        await storageSettings.setLocale(locale)
+      },
+      switchModel: (provider, model) => switchModelForRuntime(provider, model),
     },
   )
 
@@ -180,6 +225,10 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
 
     return activateModelConfig(newConfig)
   }
+  switchModelForRuntime = (providerName, modelName) => {
+    const switched = switchModel(providerName, modelName)
+    return switched ? { provider: switched.provider, model: switched.model } : null
+  }
 
   return {
     i18n,
@@ -203,6 +252,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     switchModel,
     applyModelConfig: activateModelConfig,
     toolApproval,
+    userInteraction,
     memoryStore: null,
     skillStore: skillService,
     mcpServerList: mcpRegistry.getConnectedServers(),

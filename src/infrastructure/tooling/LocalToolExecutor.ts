@@ -8,7 +8,7 @@ import type {
 } from '../../application/ports/ToolExecutorPort'
 import {
   classifyFileOpsRisk,
-  requiresApproval,
+  resolveToolAuthorization,
 } from '../../domain/tooling/services/ToolApprovalPolicy'
 import type {
   ToolActionIntent,
@@ -32,6 +32,13 @@ import type { McpRegistry } from '../mcp/McpClient'
 import type { CheckpointManager } from '../checkpoint/CheckpointManager'
 import type { SubAgentOrchestratorPort } from '../../domain/agent/SubAgentOrchestratorPort'
 import { computeDiffStats, computeLineDiff, formatDiffAsText } from '../diff/DiffEngine'
+import type { PermissionMode } from '../../application/dto/UiPreferences'
+import type { UserInteractionPort } from '../../application/ports/UserInteractionPort'
+import { runAskUser } from './handlers/askUserHandler'
+import type { RuntimeControlPort } from '../../application/ports/RuntimeControlPort'
+import { isAssistantMode } from '../../domain/assistant/value-objects/AssistantMode'
+import type { AnimationLevel, PermissionMode as RuntimePermissionMode } from '../../application/dto/UiPreferences'
+import { SUPPORTED_APP_LOCALES, type AppLocale } from '../../application/i18n/AppI18n'
 
 /**
  * 工具调度入口。
@@ -74,6 +81,9 @@ export class LocalToolExecutor implements ToolExecutorPort {
      * 返回 undefined 表示当前没配 API key —— 此时 task 工具报错而不是静默失败。
      */
     private readonly resolveSubAgents?: () => SubAgentOrchestratorPort | undefined,
+    private readonly resolvePermissionMode: () => PermissionMode = () => 'manual',
+    private readonly userInteraction?: UserInteractionPort,
+    private readonly runtimeControl?: RuntimeControlPort,
   ) {}
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
@@ -99,6 +109,18 @@ export class LocalToolExecutor implements ToolExecutorPort {
   ): Promise<ToolExecutionResult> {
     // MCP tools are routed to the McpRegistry
     if (request.toolId.startsWith('mcp__') && this.mcpRegistry) {
+      const denial = await this.ensureApproved(
+        {
+          toolId: request.toolId,
+          riskLevel: 'dangerous',
+          summary: `invoke external MCP tool ${request.toolId}`,
+          scope: 'outside',
+          kind: 'network',
+          mutates: true,
+        },
+        deadline,
+      )
+      if (denial) return denial
       const mcpResult = await this.mcpRegistry.executeTool(request)
       if (mcpResult) {
         return mcpResult
@@ -123,6 +145,18 @@ export class LocalToolExecutor implements ToolExecutorPort {
         return this.executeShellRunner(request, deadline)
       case 'task':
         return this.executeTask(request, deadline)
+      case 'ask-user':
+        if (!this.userInteraction) {
+          return toolFailure(request.toolId, 'Interactive user questions are unavailable in this runtime.')
+        }
+        deadline.pause()
+        try {
+          return await runAskUser(request, this.userInteraction)
+        } finally {
+          deadline.resume()
+        }
+      case 'runtime-control':
+        return this.executeRuntimeControl(request, deadline)
       default:
         return toolFailure(request.toolId, `Tool "${request.toolId}" is not implemented yet.`)
     }
@@ -138,13 +172,19 @@ export class LocalToolExecutor implements ToolExecutorPort {
     }
 
     const { action, resolvedPath } = parsed.value
-    const targetPath = toRelativePath(request.workspace.rootPath, resolvedPath)
+    const targetPath = parsed.value.scope === 'outside'
+      ? resolvedPath
+      : toRelativePath(request.workspace.rootPath, resolvedPath)
+    const scope = parsed.value.scope === 'outside' ? 'outside' : classifyWorkspaceTarget(targetPath)
     const denial = await this.ensureApproved(
       {
         toolId: request.toolId,
         riskLevel: classifyFileOpsRisk(action),
         summary: `${action} ${targetPath}`,
         targetPath,
+        scope,
+        kind: action === 'read' || action === 'list' ? 'read' : 'write',
+        mutates: MUTATING_FILE_OPS.has(action),
         preview: await buildFileOpsPreview(parsed.value, targetPath),
       },
       deadline,
@@ -157,11 +197,16 @@ export class LocalToolExecutor implements ToolExecutorPort {
     // Snapshot the pre-write state so a successful tool call can be rolled back later.
     // Failed validation or writes must not leave a restore point for an operation that never landed.
     let snapshotId: string | undefined
-    if (this.checkpoints && MUTATING_FILE_OPS.has(action)) {
+    if (this.checkpoints && parsed.value.scope === 'workspace' && MUTATING_FILE_OPS.has(action)) {
       try {
         snapshotId = this.checkpoints.captureBeforeWrite(
           targetPath,
           `file-ops ${action} ${targetPath}`,
+          {
+            sessionId: request.sessionId,
+            toolId: request.toolId,
+            toolInput: request.input,
+          },
         )
       } catch {
         // Checkpoints are a recovery aid, not an availability boundary for an approved write.
@@ -191,6 +236,9 @@ export class LocalToolExecutor implements ToolExecutorPort {
         toolId: request.toolId,
         riskLevel,
         summary,
+        scope: 'workspace',
+        kind: classifyShellIntentKind(summary),
+        mutates: effect.writes.length > 0,
         // 命令风险展开：光一个 careful 标签说明不了批准之后会发生什么，
         // `git add` 和 `git reset --hard` 在面板上长得一模一样。
         preview: formatShellCommandEffect(effect),
@@ -223,12 +271,134 @@ export class LocalToolExecutor implements ToolExecutorPort {
         toolId: request.toolId,
         riskLevel: 'careful',
         summary: `dispatch ${parsed.value.tasks.length} sub-agent task(s)`,
+        scope: 'workspace',
+        kind: 'orchestration',
+        mutates: false,
         preview: formatTaskPreview(parsed.value),
       },
       deadline,
     )
 
     return denial ?? runTaskBatch(request, parsed.value, orchestrator)
+  }
+
+  private async executeRuntimeControl(
+    request: ToolExecutionRequest,
+    deadline: ToolExecutionDeadline,
+  ): Promise<ToolExecutionResult> {
+    if (!this.runtimeControl) {
+      return toolFailure(request.toolId, 'Runtime settings control is unavailable.')
+    }
+
+    let input: {
+      action?: unknown
+      value?: unknown
+      provider?: unknown
+      model?: unknown
+      rationale?: unknown
+    }
+    try {
+      input = JSON.parse(request.input) as typeof input
+    } catch {
+      return toolFailure(request.toolId, 'runtime-control input must be valid JSON.')
+    }
+
+    const action = typeof input.action === 'string' ? input.action : ''
+    const value = typeof input.value === 'string' ? input.value.trim() : ''
+    const rationale = typeof input.rationale === 'string' ? input.rationale.trim() : ''
+
+    if (action === 'inspect') {
+      return {
+        toolId: request.toolId,
+        ok: true,
+        content: [
+          `assistantMode=${request.session?.mode ?? 'unknown'}`,
+          `permissionMode=${this.runtimeControl.getPermissionMode()}`,
+          this.runtimeControl.inspect(),
+        ].join('\n'),
+      }
+    }
+
+    if (action === 'set-assistant-mode') {
+      if (!request.session || !isAssistantMode(value)) {
+        return toolFailure(request.toolId, 'set-assistant-mode requires value chat, agent, or plan.')
+      }
+      const increasesCapability = request.session.mode === 'plan' && value !== 'plan'
+      const denial = increasesCapability
+        ? await this.ensureApproved({
+            toolId: request.toolId,
+            riskLevel: 'careful',
+            summary: `switch assistant mode from ${request.session.mode} to ${value}`,
+            scope: 'protected',
+            kind: 'other',
+            mutates: false,
+            preview: rationale || undefined,
+          }, deadline)
+        : null
+      if (denial) return denial
+      request.session.switchMode(value, new Date())
+      return { toolId: request.toolId, ok: true, content: `Assistant mode switched to ${value}.` }
+    }
+
+    if (action === 'set-permission-mode') {
+      if (!isPermissionMode(value)) {
+        return toolFailure(request.toolId, 'set-permission-mode requires manual, workspace, auto, or plan.')
+      }
+      const current = this.runtimeControl.getPermissionMode()
+      const increasesCapability = permissionRank(value) > permissionRank(current)
+      const denial = increasesCapability
+        ? await this.ensureApproved({
+            toolId: request.toolId,
+            riskLevel: 'dangerous',
+            summary: `increase tool permission mode from ${current} to ${value}`,
+            scope: 'protected',
+            kind: 'other',
+            mutates: false,
+            preview: rationale || undefined,
+          }, deadline)
+        : null
+      if (denial) return denial
+      await this.runtimeControl.setPermissionMode(value)
+      return { toolId: request.toolId, ok: true, content: `Permission mode switched to ${value}.` }
+    }
+
+    if (action === 'set-language') {
+      if (!SUPPORTED_APP_LOCALES.includes(value as AppLocale)) {
+        return toolFailure(request.toolId, 'set-language requires zh-CN or en.')
+      }
+      await this.runtimeControl.setLocale(value as AppLocale)
+      return { toolId: request.toolId, ok: true, content: `Language saved as ${value}; fully applies after restart.` }
+    }
+
+    if (action === 'set-animation') {
+      if (!isAnimationLevel(value)) {
+        return toolFailure(request.toolId, 'set-animation requires off, minimal, or full.')
+      }
+      await this.runtimeControl.setAnimationLevel(value)
+      return { toolId: request.toolId, ok: true, content: `Animation level saved as ${value}.` }
+    }
+
+    if (action === 'switch-model') {
+      const provider = typeof input.provider === 'string' ? input.provider.trim() : ''
+      const model = typeof input.model === 'string' ? input.model.trim() : undefined
+      if (!provider) return toolFailure(request.toolId, 'switch-model requires a configured provider.')
+      const denial = await this.ensureApproved({
+        toolId: request.toolId,
+        riskLevel: 'careful',
+        summary: `switch model provider to ${provider}${model ? ` (${model})` : ''}`,
+        scope: 'protected',
+        kind: 'other',
+        mutates: false,
+        preview: rationale || undefined,
+      }, deadline)
+      if (denial) return denial
+      const switched = this.runtimeControl.switchModel(provider, model)
+      return switched
+        ? { toolId: request.toolId, ok: true, content: `Model switched to ${switched.provider}/${switched.model}.` }
+        : toolFailure(request.toolId, `Configured provider or model was not found: ${provider}${model ? `/${model}` : ''}.`)
+    }
+
+    return toolFailure(request.toolId, `Unsupported runtime-control action: ${action || '(missing)'}.`)
   }
 
   /**
@@ -242,8 +412,17 @@ export class LocalToolExecutor implements ToolExecutorPort {
     intent: ToolActionIntent,
     deadline?: ToolExecutionDeadline,
   ): Promise<ToolExecutionResult | null> {
-    if (!requiresApproval(intent)) {
+    const mode = this.resolvePermissionMode()
+    const authorization = resolveToolAuthorization(intent, mode)
+    if (authorization === 'allow') {
       return null
+    }
+
+    if (authorization === 'deny') {
+      return toolFailure(
+        intent.toolId,
+        `Permission mode "${mode}" blocks this operation: ${intent.summary}.`,
+      )
     }
 
     deadline?.pause()
@@ -267,6 +446,49 @@ export class LocalToolExecutor implements ToolExecutorPort {
 
 function toRelativePath(rootPath: string, resolvedPath: string): string {
   return relative(rootPath, resolvedPath) || '.'
+}
+
+function classifyWorkspaceTarget(targetPath: string): 'workspace' | 'protected' {
+  const normalized = targetPath.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
+  return normalized === '.git' ||
+    normalized.startsWith('.git/') ||
+    normalized === '.adnify' ||
+    normalized.startsWith('.adnify/') ||
+    normalized === '.env' ||
+    normalized.startsWith('.env.') ||
+    normalized.endsWith('.pem') ||
+    normalized.endsWith('.key')
+    ? 'protected'
+    : 'workspace'
+}
+
+function classifyShellIntentKind(summary: string): 'verification' | 'git' | 'install' | 'other' {
+  const normalized = summary.toLowerCase()
+  if (/^(?:bun test|bun run (?:build|typecheck|test|lint|check)|npm (?:test|run (?:build|test|lint|typecheck))|pnpm (?:test|run (?:build|test|lint|typecheck))|yarn (?:test|build|lint|typecheck)|(?:bunx|npx )?(?:tsc|eslint|vitest|jest))\b/.test(normalized)) {
+    return 'verification'
+  }
+  if (/^(?:npm|pnpm|yarn) (?:install|ci|i|add)\b|^(?:npx|bunx|bun x)\b/.test(normalized)) {
+    return 'install'
+  }
+  if (/^git\b/.test(normalized)) return 'git'
+  return 'other'
+}
+
+function isPermissionMode(value: string): value is RuntimePermissionMode {
+  return value === 'manual' || value === 'workspace' || value === 'auto' || value === 'plan'
+}
+
+function permissionRank(mode: RuntimePermissionMode): number {
+  switch (mode) {
+    case 'plan': return 0
+    case 'manual': return 1
+    case 'workspace': return 2
+    case 'auto': return 3
+  }
+}
+
+function isAnimationLevel(value: string): value is AnimationLevel {
+  return value === 'off' || value === 'minimal' || value === 'full'
 }
 
 /**

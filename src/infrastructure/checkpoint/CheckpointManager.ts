@@ -15,6 +15,12 @@ export interface CheckpointEntry {
   timestamp: number
 }
 
+export interface CheckpointMetadata {
+  sessionId?: string
+  toolId?: string
+  toolInput?: string
+}
+
 /**
  * 一次工具调用事务的检查点。
  * 包含该事务中被修改的所有文件的快照。
@@ -28,6 +34,8 @@ export interface CheckpointSnapshot {
   entries: CheckpointEntry[]
   /** 创建时间戳 */
   createdAt: number
+  /** Connects the file recovery point to the agent execution that produced it. */
+  metadata?: CheckpointMetadata
 }
 
 /**
@@ -71,7 +79,11 @@ export class CheckpointManager {
    * @param description 操作描述
    * @returns 快照 ID
    */
-  captureBeforeWrite(relativePath: string, description: string): string {
+  captureBeforeWrite(
+    relativePath: string,
+    description: string,
+    metadata?: CheckpointMetadata,
+  ): string {
     const normalizedPath = relativePath.replace(/\\/g, '/')
 
     let originalContent: string | null
@@ -89,7 +101,7 @@ export class CheckpointManager {
       timestamp: Date.now(),
     }
 
-    return this.commitSnapshot([entry], description)
+    return this.commitSnapshot([entry], description, metadata)
   }
 
   /**
@@ -196,7 +208,11 @@ export class CheckpointManager {
    * 注册一次工具调用的完整事务快照。
    * 在工具执行后调用，将所有捕获的条目持久化。
    */
-  commitSnapshot(entries: CheckpointEntry[], description: string): string {
+  commitSnapshot(
+    entries: CheckpointEntry[],
+    description: string,
+    metadata?: CheckpointMetadata,
+  ): string {
     const createdAt = Math.max(Date.now(), this.lastCreatedAt + 1)
     this.lastCreatedAt = createdAt
     const id = this.generateId(createdAt)
@@ -205,6 +221,7 @@ export class CheckpointManager {
       description,
       entries,
       createdAt,
+      metadata,
     }
 
     this.ensureCheckpointDir()

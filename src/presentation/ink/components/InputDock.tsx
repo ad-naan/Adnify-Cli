@@ -7,6 +7,7 @@ import { ActivityPulse } from './ActivityPulse'
 import type { CommandSuggestionItem } from './CommandSuggestionList'
 import { CommandSuggestionList } from './CommandSuggestionList'
 import { NativeInputLine } from './NativeInputLine'
+import { ChoiceTabs, type ChoiceTabItem } from './ChoiceTabs'
 
 export interface InputDockProps {
   value: string
@@ -17,10 +18,13 @@ export interface InputDockProps {
   modelLabel: string
   configInitPrompt?: string
   toolApprovalPrompt?: string
+  userInteractionPrompt?: string
   commandSuggestions: CommandSuggestionItem[]
   selectedSuggestionIndex: number
   isSuggestionOpen: boolean
   i18n: AppI18n
+  choiceItems?: ChoiceTabItem[]
+  selectedChoiceIndex?: number
 }
 
 /** 提示块的两种语气：配置向导偏中性，工具审批偏警示。 */
@@ -67,8 +71,11 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
   // 审批优先于配置向导：它只在执行中途弹出，此时必须压住其他面板。
   const isApprovalActive = Boolean(props.toolApprovalPrompt)
   const isConfigActive = Boolean(props.configInitPrompt)
+  const isInteractionActive = Boolean(props.userInteractionPrompt)
   const approvalPromptLines = props.toolApprovalPrompt?.split('\n') ?? []
   const configPromptLines = props.configInitPrompt?.split('\n') ?? []
+  const interactionPromptLines = props.userInteractionPrompt?.split('\n') ?? []
+  const hasChoices = Boolean(props.choiceItems?.length)
   return (
     <Box
       width="100%"
@@ -79,30 +86,36 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
     >
       {isApprovalActive ? (
         <PromptBlock lines={approvalPromptLines} tone="approval" keyPrefix="approval-prompt" />
+      ) : isInteractionActive ? (
+        <PromptBlock lines={interactionPromptLines} tone="config" keyPrefix="interaction-prompt" />
       ) : isConfigActive ? (
         <PromptBlock lines={configPromptLines} tone="config" keyPrefix="config-prompt" />
       ) : null}
 
-      <Box width="100%" gap={1} alignItems="center">
-        <Text color={props.busy ? adnifyTheme.brandSoft : adnifyTheme.success} bold>
-          {props.busy ? '◉' : '❯'}
-        </Text>
-        <NativeInputLine
-          value={props.value}
-          cursor={props.cursor}
-          placeholder={props.i18n.t('input.placeholder')}
-          active={!props.busy && !isApprovalActive}
-        />
-        {props.busy ? (
-          <ActivityPulse
-            active
-            animated={Boolean(props.animateBusyIndicator)}
-            color={adnifyTheme.brandSoft}
-            idleFrame="·"
-            variant="dots"
+      {hasChoices ? (
+        <ChoiceTabs items={props.choiceItems ?? []} selectedIndex={props.selectedChoiceIndex ?? 0} />
+      ) : (
+        <Box width="100%" gap={1} alignItems="center">
+          <Text color={props.busy ? adnifyTheme.brandSoft : adnifyTheme.success} bold>
+            {props.busy ? '◉' : '❯'}
+          </Text>
+          <NativeInputLine
+            value={props.value}
+            cursor={props.cursor}
+            placeholder={props.i18n.t('input.placeholder')}
+            active={!props.busy && !isApprovalActive && !isInteractionActive}
           />
-        ) : null}
-      </Box>
+          {props.busy ? (
+            <ActivityPulse
+              active
+              animated={Boolean(props.animateBusyIndicator)}
+              color={adnifyTheme.brandSoft}
+              idleFrame="·"
+              variant="dots"
+            />
+          ) : null}
+        </Box>
+      )}
 
       {props.isSuggestionOpen ? (
         <Box flexDirection="column" marginTop={1}>
@@ -115,10 +128,10 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
             <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintDefault')}</Text>
           </Box>
         </Box>
-      ) : isApprovalActive ? (
-        <Text color={adnifyTheme.warm}>{props.i18n.t('approval.instruction')}</Text>
+      ) : isApprovalActive || isInteractionActive ? (
+        <Text color={adnifyTheme.warm}>{props.i18n.t('input.hintChoiceTabs')}</Text>
       ) : isConfigActive ? (
-        <Text color={adnifyTheme.textDim}>{props.i18n.t('input.hintConfigInit')}</Text>
+        <Text color={adnifyTheme.textDim}>{hasChoices ? props.i18n.t('input.hintChoiceTabs') : props.i18n.t('input.hintConfigInit')}</Text>
       ) : null}
     </Box>
   )

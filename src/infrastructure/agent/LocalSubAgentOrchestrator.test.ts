@@ -107,6 +107,47 @@ describe('LocalSubAgentOrchestrator', () => {
     expect(tasks[0]?.status).toBe('completed')
   })
 
+  test('runs implement workers in a disposable worktree and returns their patch', async () => {
+    const seen: ModelRequest[] = []
+    const executedRoots: string[] = []
+    let disposed = false
+    const writeExecutor: ToolExecutorPort = {
+      execute: async (request) => {
+        executedRoots.push(request.workspace.rootPath)
+        return { toolId: request.toolId, ok: true, content: 'File written' }
+      },
+    }
+    const gateway = sequenceGateway([
+      () => nativeTool('file-ops', '{"action":"write","path":"src/x.ts","content":"x","allowWrite":true}'),
+      () => text('Implemented.'),
+      () => nativeTool('shell-runner', '{"argv":["bun","test"]}'),
+      () => text('Implemented and checked.'),
+    ], seen)
+    const options = {
+      ...createOptions(),
+      createWorktreeToolExecutor: () => writeExecutor,
+      worktreeManagerFactory: () => ({
+        create: async () => ({ id: 'task-1', path: '/workspace/.adnify/worktrees/task-1' }),
+        capturePatch: async () => ({ status: ' M src/x.ts', patch: 'diff --git a/src/x.ts b/src/x.ts' }),
+        dispose: async () => { disposed = true },
+      }),
+    }
+    const orchestrator = new LocalSubAgentOrchestrator(gateway, config, options)
+    const tasks = orchestrator.createTasks([
+      { title: 'Implement x', instruction: 'Write src/x.ts', role: 'implement' },
+    ])
+
+    await orchestrator.runBatch(tasks, { maxConcurrency: 1, workspace })
+
+    expect(executedRoots).toEqual([
+      '/workspace/.adnify/worktrees/task-1',
+      '/workspace/.adnify/worktrees/task-1',
+    ])
+    expect(seen[0]?.tools?.map((tool) => tool.name)).toContain('shell-runner')
+    expect(tasks[0]?.result).toContain('diff --git a/src/x.ts')
+    expect(disposed).toBe(true)
+  })
+
   test('schedules high-priority work before low-priority work', async () => {
     const starts: string[] = []
     const gateway: ModelGatewayPort = {

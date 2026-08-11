@@ -19,7 +19,7 @@ export interface SubAgentTaskProps {
 }
 
 export type SubAgentPriority = 'low' | 'normal' | 'high'
-export type SubAgentRole = 'general' | 'explore' | 'review' | 'test'
+export type SubAgentRole = 'general' | 'explore' | 'review' | 'test' | 'implement'
 
 export type SubAgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 

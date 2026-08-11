@@ -17,6 +17,22 @@ const toolMessage = new ConversationMessage({
 })
 
 describe('ConversationViewport detail levels', () => {
+  test('shows an execution indicator before the first streaming token', () => {
+    const userMessage = new ConversationMessage({
+      id: 'user-pending',
+      role: 'user',
+      createdAt: new Date('2026-08-10T00:00:00.000Z'),
+      content: 'please inspect the repository',
+    })
+    const output = renderToString(
+      <ConversationViewport messages={[userMessage]} busy viewportRows={12} i18n={i18n} />,
+      { columns: 80 },
+    )
+
+    expect(output).toContain('please inspect the repository')
+    expect(output).toContain('analyzing and working')
+  })
+
   test('collapses verbose tool output in the regular conversation', () => {
     const output = renderToString(
       <ConversationViewport messages={[toolMessage]} viewportRows={12} i18n={i18n} />,

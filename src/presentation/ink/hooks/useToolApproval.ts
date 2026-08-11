@@ -6,13 +6,18 @@ import type {
   ToolActionIntent,
   ToolApprovalDecision,
 } from '../../../domain/tooling/value-objects/ToolApproval'
+import type { ChoiceTabItem } from '../components/ChoiceTabs'
+import { useChoiceSelection } from './useChoiceSelection'
 
 export interface ToolApprovalState {
   isActive: boolean
   promptText: string
   errorText: string
   /** 处理审批面板上的按键；返回一句状态文案用于写入会话区，null 表示输入无效。 */
-  handleInput: (input: string) => string | null
+  choiceItems: ChoiceTabItem[]
+  selectedChoiceIndex: number
+  moveSelection: (direction: 'previous' | 'next') => void
+  confirmSelection: () => string | null
   /** 中止时清空待决审批，避免执行流挂死。 */
   denyAll: () => void
 }
@@ -28,6 +33,7 @@ export function useToolApproval(
 ): ToolApprovalState {
   const [pending, setPending] = useState<ToolActionIntent | null>(null)
   const [errorText, setErrorText] = useState('')
+  const choice = useChoiceSelection(3, pending ? `${pending.toolId}:${pending.summary}` : null)
 
   useEffect(() => {
     if (!controller) {
@@ -40,17 +46,17 @@ export function useToolApproval(
     })
   }, [controller])
 
-  const handleInput = useCallback(
-    (input: string): string | null => {
+  const confirmSelection = useCallback(
+    (): string | null => {
       if (!controller || !pending) {
         return null
       }
 
-      const decision = parseDecision(input)
-      if (!decision) {
-        setErrorText(i18n.t('approval.choiceError'))
-        return null
-      }
+      const decision: ToolApprovalDecision = choice.selectedIndex === 0
+        ? 'approved'
+        : choice.selectedIndex === 1
+          ? 'denied'
+          : 'always-approved'
 
       setErrorText('')
       if (!controller.resolvePending(decision)) {
@@ -59,8 +65,12 @@ export function useToolApproval(
 
       return describeDecision(decision, pending, i18n)
     },
-    [controller, i18n, pending],
+    [choice.selectedIndex, controller, i18n, pending],
   )
+
+  const moveSelection = useCallback((direction: 'previous' | 'next') => {
+    choice.move(direction)
+  }, [choice])
 
   const denyAll = useCallback(() => {
     controller?.denyAllPending()
@@ -71,21 +81,15 @@ export function useToolApproval(
     isActive: pending !== null,
     promptText: pending ? buildPromptText(pending, i18n, previewRows) : '',
     errorText,
-    handleInput,
+    choiceItems: [
+      { id: 'approve', label: i18n.t('approval.choice.approve') },
+      { id: 'deny', label: i18n.t('approval.choice.deny') },
+      { id: 'always', label: i18n.t('approval.choice.always') },
+    ],
+    selectedChoiceIndex: choice.selectedIndex,
+    moveSelection,
+    confirmSelection,
     denyAll,
-  }
-}
-
-function parseDecision(input: string): ToolApprovalDecision | null {
-  switch (input.trim().toLowerCase()) {
-    case 'y':
-      return 'approved'
-    case 'n':
-      return 'denied'
-    case 'a':
-      return 'always-approved'
-    default:
-      return null
   }
 }
 

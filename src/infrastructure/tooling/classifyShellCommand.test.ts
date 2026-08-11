@@ -28,11 +28,11 @@ describe('classifyShellCommand', () => {
     })
     expect(classifyShellCommand(['bunx', 'tsc', '--noEmit'])).toMatchObject({
       ok: true,
-      riskLevel: 'careful',
+      riskLevel: 'dangerous',
     })
     expect(classifyShellCommand(['bun', 'x', 'tsc'])).toMatchObject({
       ok: true,
-      riskLevel: 'careful',
+      riskLevel: 'dangerous',
     })
   })
 
@@ -49,6 +49,12 @@ describe('classifyShellCommand', () => {
   it('rejects unknown commands and empty argv', () => {
     expect(classifyShellCommand(['del', 'foo.txt']).ok).toBe(false)
     expect(classifyShellCommand([])).toEqual({ ok: false, reason: 'Missing command name.' })
+  })
+
+  it('marks irreversible git and package installation as dangerous', () => {
+    expect(classifyShellCommand(['git', 'reset', '--hard'])).toMatchObject({ ok: true, riskLevel: 'dangerous' })
+    expect(classifyShellCommand(['git', 'commit', '--amend'])).toMatchObject({ ok: true, riskLevel: 'dangerous' })
+    expect(classifyShellCommand(['npm', 'install'])).toMatchObject({ ok: true, riskLevel: 'dangerous' })
   })
 })
 

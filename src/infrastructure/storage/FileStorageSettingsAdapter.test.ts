@@ -65,8 +65,9 @@ describe('FileStorageSettingsAdapter', () => {
 
     await adapter.setLocale('zh-CN')
     await adapter.setAnimationLevel('full')
+    await adapter.setPermissionMode('workspace')
 
     const raw = await readFile(join(settingsEnvRoot, appName, 'settings.json'), 'utf8')
-    expect(JSON.parse(raw)).toEqual({ locale: 'zh-CN', animationLevel: 'full' })
+    expect(JSON.parse(raw)).toEqual({ locale: 'zh-CN', animationLevel: 'full', permissionMode: 'workspace' })
   })
 })

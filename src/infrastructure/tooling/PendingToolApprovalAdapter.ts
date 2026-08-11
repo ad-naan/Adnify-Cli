@@ -6,6 +6,7 @@ import type {
   ToolActionIntent,
   ToolApprovalDecision,
 } from '../../domain/tooling/value-objects/ToolApproval'
+import type { PermissionMode } from '../../application/dto/UiPreferences'
 
 interface PendingEntry {
   intent: ToolActionIntent
@@ -27,8 +28,10 @@ export class PendingToolApprovalAdapter implements ToolApprovalPort, ToolApprova
   private readonly sessionAllowList = new Set<string>()
   private observer: PendingApprovalObserver | null = null
 
+  constructor(private mode: PermissionMode = 'workspace') {}
+
   async requestApproval(intent: ToolActionIntent): Promise<ToolApprovalDecision> {
-    if (this.sessionAllowList.has(intent.toolId)) {
+    if (this.sessionAllowList.has(toApprovalRuleKey(intent))) {
       return 'approved'
     }
 
@@ -55,7 +58,7 @@ export class PendingToolApprovalAdapter implements ToolApprovalPort, ToolApprova
     }
 
     if (decision === 'always-approved') {
-      this.sessionAllowList.add(entry.intent.toolId)
+      this.sessionAllowList.add(toApprovalRuleKey(entry.intent))
     }
 
     entry.settle(decision)
@@ -76,9 +79,25 @@ export class PendingToolApprovalAdapter implements ToolApprovalPort, ToolApprova
     this.notifyObserver()
   }
 
+  getMode(): PermissionMode {
+    return this.mode
+  }
+
+  setMode(mode: PermissionMode): void {
+    this.mode = mode
+  }
+
   private notifyObserver(): void {
     this.observer?.(this.getPending())
   }
+}
+
+function toApprovalRuleKey(intent: ToolActionIntent): string {
+  const target = intent.targetPath?.replace(/\\/g, '/').toLowerCase() ?? ''
+  const operation = intent.toolId === 'shell-runner'
+    ? intent.summary.trim().toLowerCase()
+    : `${intent.kind ?? 'other'}:${target}`
+  return [intent.toolId, intent.scope ?? 'workspace', operation].join('|')
 }
 
 /** 默认实现：无人审批时（如单测、非交互场景）直接放行，保持既有行为。 */

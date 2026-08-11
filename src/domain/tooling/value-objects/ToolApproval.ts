@@ -4,6 +4,16 @@
  */
 
 export type ToolRiskLevel = 'safe' | 'careful' | 'dangerous'
+export type ToolActionScope = 'workspace' | 'outside' | 'protected'
+export type ToolActionKind =
+  | 'read'
+  | 'write'
+  | 'verification'
+  | 'git'
+  | 'install'
+  | 'orchestration'
+  | 'network'
+  | 'other'
 
 export type ToolApprovalDecision = 'approved' | 'denied' | 'always-approved'
 
@@ -15,6 +25,9 @@ export interface ToolActionIntent {
   summary: string
   /** 受影响的工作区相对路径，只读类操作可以为空。 */
   targetPath?: string
+  scope?: ToolActionScope
+  kind?: ToolActionKind
+  mutates?: boolean
   /**
    * 改动预览（统一 diff 文本），仅写入类操作提供。
    * 让用户在批准前看到「将要发生什么」—— 此时改动还没落盘，git diff 看不到。

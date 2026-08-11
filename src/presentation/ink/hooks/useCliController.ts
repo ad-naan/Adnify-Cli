@@ -7,8 +7,11 @@ import { MemoryStore } from '../../../infrastructure/storage/MemoryStore'
 import type { ConversationSession } from '../../../domain/session/aggregates/ConversationSession'
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import type { CommandSuggestionItem } from '../components/CommandSuggestionList'
+import type { ChoiceTabItem } from '../components/ChoiceTabs'
 import { useConfigInit } from './useConfigInit'
 import { useToolApproval } from './useToolApproval'
+import { useUserInteraction } from './useUserInteraction'
+import { usePermissionPicker } from './usePermissionPicker'
 
 export interface UseCliControllerParams {
   runtime: AdnifyCliRuntime
@@ -41,9 +44,12 @@ export interface CliControllerState {
   isBusy: boolean
   configInitPrompt: string
   toolApprovalPrompt: string
+  userInteractionPrompt: string
   commandSuggestions: CommandSuggestionItem[]
   selectedSuggestionIndex: number
   isSuggestionOpen: boolean
+  choiceItems: ChoiceTabItem[]
+  selectedChoiceIndex: number
   recentSessions: SessionListItem[]
   handleInput: (input: string, key: Key) => void
   handlePaste: (text: string) => void
@@ -70,6 +76,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':config clear api-key': 'command.desc.config',
   ':language [zh-CN|en]': 'command.desc.language',
   ':animation [off|minimal|full]': 'command.desc.animation',
+  ':permissions [manual|workspace|auto|plan]': 'command.desc.permissions',
   ':session': 'command.desc.session',
   ':sessions': 'command.desc.sessions',
   ':resume [index|id]': 'command.desc.resume',
@@ -140,6 +147,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     i18n,
     approvalPreviewRows(stdout?.rows ?? 30),
   )
+  const userInteraction = useUserInteraction(params.runtime.userInteraction)
+  const permissionPicker = usePermissionPicker(i18n, params.runtime.toolApproval)
 
   const flushStreamingBuffer = useCallback(() => {
     if (streamingFlushTimerRef.current) {
@@ -302,7 +311,12 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   }, [bootstrap, i18n, inputValue])
 
   const isSuggestionOpen =
-    commandSuggestions.length > 0 && !configInit.isActive && !isSuggestionDismissed
+    commandSuggestions.length > 0 &&
+    !configInit.isActive &&
+    !permissionPicker.isActive &&
+    !userInteraction.isActive &&
+    !toolApproval.isActive &&
+    !isSuggestionDismissed
 
   useEffect(() => {
     if (selectedSuggestionIndex >= commandSuggestions.length) {
@@ -392,6 +406,29 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     [exitHistoryNavigation, historyIndex, inputHistory, inputValue],
   )
 
+  const runConfigInput = useCallback(async (value: string, useSelection = false) => {
+    busyRef.current = true
+    setIsBusy(true)
+    setInputValue('')
+    setInputCursor(0)
+
+    try {
+      const result = useSelection
+        ? await configInit.confirmSelection()
+        : await configInit.handleInput(value)
+      if (result) {
+        setBootstrap((previous) => (previous ? { ...previous, modelConfig: result.config } : previous))
+        setStatusLine(result.message)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      setStatusLine(i18n.t('status.configFailed', { message }))
+    } finally {
+      busyRef.current = false
+      setIsBusy(false)
+    }
+  }, [configInit, i18n])
+
   const handleSubmit = useCallback(async () => {
     if (!session || !bootstrap || busyRef.current) {
       return
@@ -404,29 +441,20 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     }
 
     if (configInit.isActive) {
-      busyRef.current = true
-      setIsBusy(true)
-      setInputValue('')
-      setInputCursor(0)
-
-      try {
-        const result = await configInit.handleInput(nextInput)
-        if (result) {
-          setBootstrap((previous) => (previous ? { ...previous, modelConfig: result.config } : previous))
-          setStatusLine(result.message)
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        setStatusLine(i18n.t('status.configFailed', { message }))
-      } finally {
-        busyRef.current = false
-        setIsBusy(false)
-      }
-
+      await runConfigInput(nextInput)
       return
     }
 
     if (!nextInput) {
+      return
+    }
+
+    if (nextInput === ':permissions' || nextInput === ':permission') {
+      commitInputHistory(nextInput)
+      setInputValue('')
+      setInputCursor(0)
+      permissionPicker.open()
+      setStatusLine(i18n.t('status.selectPermissionMode'))
       return
     }
 
@@ -458,6 +486,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           skillStore: params.runtime.skillStore ?? undefined,
           mcpServerList: params.runtime.mcpServerList ?? undefined,
           checkpointStore: params.runtime.checkpoints ?? undefined,
+          permissionController: params.runtime.toolApproval,
           configUpdater: {
             applyModelConfig: (nextConfig) => {
               const activeConfig = params.runtime.applyModelConfig(nextConfig)
@@ -490,6 +519,12 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
 
       resetStreamingState()
 
+      // Render the submitted message before any repository read or API request begins.
+      // The use case replaces this temporary clone with the persisted message and stable id.
+      const optimisticSession = session.clone()
+      optimisticSession.addUserMessage(`pending-user-${Date.now()}`, new Date(), nextInput)
+      setSession(optimisticSession)
+
       const memoryBlock = memoryStoreRef.current
         ? await memoryStoreRef.current.toPromptBlock()
         : undefined
@@ -516,6 +551,9 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
                 createdAt: new Date(),
               }),
             ])
+          },
+          onWorkflowPhase: (phase) => {
+            setStatusLine(i18n.t(`status.workflowPhase.${phase}`))
           },
           onError: (error) => {
             flushStreamingBuffer()
@@ -554,11 +592,36 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     inputValue,
     isSuggestionOpen,
     params,
+    permissionPicker,
     queueStreamingChunk,
     resetStreamingState,
+    runConfigInput,
     selectedSuggestionIndex,
     session,
   ])
+
+  const applyPermissionSelection = useCallback(async () => {
+    if (!session || !bootstrap) return
+    const mode = permissionPicker.selectedMode
+    permissionPicker.close()
+    busyRef.current = true
+    setIsBusy(true)
+    try {
+      const result = await params.runtime.useCases.applyCliCommand.execute({
+        sessionId: session.id,
+        commandLine: `:permissions ${mode}`,
+        bootstrap,
+        permissionController: params.runtime.toolApproval,
+      })
+      setSession(result.session)
+      setStatusLine(result.statusLine)
+    } catch (error) {
+      setStatusLine(error instanceof Error ? error.message : String(error))
+    } finally {
+      busyRef.current = false
+      setIsBusy(false)
+    }
+  }, [bootstrap, params.runtime, permissionPicker, session])
 
   const handleInput = useCallback((input: string, key: Key) => {
     if (key.ctrl && input === 'c') {
@@ -574,6 +637,12 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         }
         // 有在途审批时必须一并拒绝，否则工具那边的 promise 永不 resolve、isBusy 卡死。
         toolApproval.denyAll()
+        return
+      }
+
+      if (permissionPicker.isActive) {
+        permissionPicker.close()
+        setStatusLine(i18n.t('status.permissionSelectionCancelled'))
         return
       }
 
@@ -602,11 +671,14 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       return
     }
 
-    // 审批面板活跃时，只处理 y/n/a 单键；忽略方向键、补全等全部快捷键。
+    // 审批面板把输入栏替换成选项卡；不再要求用户记 y/n/a。
     if (toolApproval.isActive) {
-      // 只接受单个字符，且非控制键。
-      if (!key.ctrl && !key.meta && input.length === 1 && !key.return) {
-        const statusMessage = toolApproval.handleInput(input)
+      if (key.leftArrow || key.upArrow) {
+        toolApproval.moveSelection('previous')
+      } else if (key.rightArrow || key.downArrow) {
+        toolApproval.moveSelection('next')
+      } else if (key.return) {
+        const statusMessage = toolApproval.confirmSelection()
         if (statusMessage) {
           setStreamingMessages((previous) => [
             ...previous,
@@ -620,6 +692,39 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         }
       }
 
+      return
+    }
+
+    if (userInteraction.isActive) {
+      if (key.leftArrow || key.upArrow) {
+        userInteraction.moveSelection('previous')
+      } else if (key.rightArrow || key.downArrow) {
+        userInteraction.moveSelection('next')
+      } else if (key.return) {
+        userInteraction.confirmSelection()
+      }
+      return
+    }
+
+    if (permissionPicker.isActive) {
+      if (key.leftArrow || key.upArrow) {
+        permissionPicker.moveSelection('previous')
+      } else if (key.rightArrow || key.downArrow) {
+        permissionPicker.moveSelection('next')
+      } else if (key.return) {
+        void applyPermissionSelection()
+      }
+      return
+    }
+
+    if (configInit.isActive && configInit.isSelectionStep) {
+      if (key.leftArrow || key.upArrow) {
+        configInit.moveSelection('up')
+      } else if (key.rightArrow || key.downArrow) {
+        configInit.moveSelection('down')
+      } else if (key.return) {
+        void runConfigInput('', true)
+      }
       return
     }
 
@@ -678,16 +783,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       return
     }
 
-    if (configInit.isActive && configInit.isSelectionStep && key.upArrow) {
-      configInit.moveSelection('up')
-      return
-    }
-
-    if (configInit.isActive && configInit.isSelectionStep && key.downArrow) {
-      configInit.moveSelection('down')
-      return
-    }
-
     if (key.rightArrow) {
       setInputCursor((previous) => Math.min(inputCharacters.length, previous + 1))
       return
@@ -738,6 +833,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     }
   }, [
     applySelectedSuggestion,
+    applyPermissionSelection,
     commandSuggestions.length,
     configInit,
     handleSubmit,
@@ -748,13 +844,15 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     isSuggestionOpen,
     navigateHistory,
     params,
+    permissionPicker,
     exitHistoryNavigation,
     toolApproval,
+    userInteraction,
     session,
   ])
 
   const handlePaste = useCallback((text: string) => {
-    if (busyRef.current || toolApproval.isActive || !text) {
+    if (busyRef.current || toolApproval.isActive || userInteraction.isActive || !text) {
       return
     }
 
@@ -765,7 +863,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     setInputCursor(inputCursor + insertedCharacters.length)
     setHistoryIndex(null)
     setIsSuggestionDismissed(false)
-  }, [inputCursor, inputValue, toolApproval.isActive])
+  }, [inputCursor, inputValue, toolApproval.isActive, userInteraction.isActive])
 
   return {
     bootstrap,
@@ -777,21 +875,38 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     streamingMessages,
     isBooting,
     isBusy,
-    configInitPrompt: configInit.isActive
-      ? configInit.promptText +
-        (configInit.errorText
-          ? `\n${i18n.t('conversation.configError', { message: configInit.errorText })}`
-          : '')
-      : '',
+    configInitPrompt: permissionPicker.isActive
+      ? permissionPicker.promptText
+      : configInit.isActive
+        ? configInit.promptText +
+          (configInit.errorText
+            ? `\n${i18n.t('conversation.configError', { message: configInit.errorText })}`
+            : '')
+        : '',
     toolApprovalPrompt: toolApproval.isActive
       ? toolApproval.promptText +
         (toolApproval.errorText
           ? `\n${i18n.t('conversation.configError', { message: toolApproval.errorText })}`
           : '')
       : '',
+    userInteractionPrompt: userInteraction.promptText,
     commandSuggestions,
     selectedSuggestionIndex,
     isSuggestionOpen,
+    choiceItems: toolApproval.isActive
+      ? toolApproval.choiceItems
+      : userInteraction.isActive
+        ? userInteraction.choiceItems
+        : permissionPicker.isActive
+          ? permissionPicker.choiceItems
+          : configInit.choiceItems,
+    selectedChoiceIndex: toolApproval.isActive
+      ? toolApproval.selectedChoiceIndex
+      : userInteraction.isActive
+        ? userInteraction.selectedChoiceIndex
+        : permissionPicker.isActive
+          ? permissionPicker.selectedChoiceIndex
+          : configInit.selectedChoiceIndex,
     recentSessions,
     handleInput,
     handlePaste,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalToolExecutor } from './LocalToolExecutor'
@@ -10,6 +10,8 @@ import type {
   ToolActionIntent,
   ToolApprovalDecision,
 } from '../../domain/tooling/value-objects/ToolApproval'
+import { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
+import type { RuntimeControlPort } from '../../application/ports/RuntimeControlPort'
 
 /** 检查点用例不关心日志输出。 */
 const silentLogger = {
@@ -45,7 +47,99 @@ async function withTempWorkspace(
   }
 }
 
+function createRuntimeApprovalSpy(decision: ToolApprovalDecision) {
+  const asked: ToolActionIntent[] = []
+  const port: ToolApprovalPort = {
+    async requestApproval(intent) {
+      asked.push(intent)
+      return decision
+    },
+  }
+  return { port, asked }
+}
+
 describe('LocalToolExecutor', () => {
+  test('lets AI apply low-risk runtime preferences without approval', async () => {
+    const approval = createRuntimeApprovalSpy('denied')
+    let animation = 'full'
+    const runtimeControl: RuntimeControlPort = {
+      inspect: () => '{}',
+      getPermissionMode: () => 'workspace',
+      setPermissionMode: async () => {},
+      setAnimationLevel: async (level) => { animation = level },
+      setLocale: async () => {},
+      switchModel: () => null,
+    }
+    const executor = new LocalToolExecutor(
+      approval.port, undefined, undefined, undefined, () => 'workspace', undefined, runtimeControl,
+    )
+
+    const result = await executor.execute({
+      toolId: 'runtime-control',
+      input: '{"action":"set-animation","value":"minimal","rationale":"reduce terminal motion"}',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(true)
+    expect(animation).toBe('minimal')
+    expect(approval.asked).toHaveLength(0)
+  })
+
+  test('requires keyboard approval before AI increases the permission mode', async () => {
+    const approval = createRuntimeApprovalSpy('approved')
+    let permission: 'manual' | 'workspace' | 'auto' | 'plan' = 'workspace'
+    const runtimeControl: RuntimeControlPort = {
+      inspect: () => '{}',
+      getPermissionMode: () => permission,
+      setPermissionMode: async (mode) => { permission = mode },
+      setAnimationLevel: async () => {},
+      setLocale: async () => {},
+      switchModel: () => null,
+    }
+    const executor = new LocalToolExecutor(
+      approval.port, undefined, undefined, undefined, () => permission, undefined, runtimeControl,
+    )
+
+    const result = await executor.execute({
+      toolId: 'runtime-control',
+      input: '{"action":"set-permission-mode","value":"auto","rationale":"run the verified migration"}',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(true)
+    expect(permission).toBe('auto')
+    expect(approval.asked[0]?.scope).toBe('protected')
+  })
+
+  test('lets AI lower assistant capability but asks before leaving explicit plan mode', async () => {
+    const approval = createRuntimeApprovalSpy('approved')
+    const runtimeControl: RuntimeControlPort = {
+      inspect: () => '{}',
+      getPermissionMode: () => 'workspace',
+      setPermissionMode: async () => {},
+      setAnimationLevel: async () => {},
+      setLocale: async () => {},
+      switchModel: () => null,
+    }
+    const executor = new LocalToolExecutor(
+      approval.port, undefined, undefined, undefined, () => 'workspace', undefined, runtimeControl,
+    )
+    const session = ConversationSession.create({
+      id: 'runtime-session', title: 'test', mode: 'plan', workspacePath: process.cwd(), createdAt: new Date(),
+    })
+
+    const result = await executor.execute({
+      toolId: 'runtime-control',
+      input: '{"action":"set-assistant-mode","value":"agent","rationale":"begin implementation"}',
+      workspace: createWorkspace(),
+      session,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(session.mode).toBe('agent')
+    expect(approval.asked).toHaveLength(1)
+  })
+
   test('should reject unsupported shell commands', async () => {
     const executor = new LocalToolExecutor()
 
@@ -295,6 +389,131 @@ describe('LocalToolExecutor approval gate', () => {
     expect(approval.asked).toHaveLength(0)
   })
 
+  test('should route ask-user through the interactive choice port', async () => {
+    const executor = new LocalToolExecutor(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => 'workspace',
+      {
+        requestChoices: async () => [{ questionId: 'scope', selectedIndex: 0, label: 'Small' }],
+      },
+    )
+    const result = await executor.execute({
+      toolId: 'ask-user',
+      input: JSON.stringify({
+        questions: [{
+          id: 'scope',
+          header: 'Scope',
+          question: 'Choose scope',
+          options: [
+            { label: 'Small', description: 'Minimal' },
+            { label: 'Full', description: 'Complete' },
+          ],
+        }],
+      }),
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.content).toContain('Small')
+  })
+
+  test('should auto-approve workspace edits in workspace mode', async () => {
+    await withTempWorkspace(async (workspace) => {
+      const approval = createApprovalSpy('denied')
+      const executor = new LocalToolExecutor(
+        approval.port,
+        undefined,
+        undefined,
+        undefined,
+        () => 'workspace',
+      )
+      const result = await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"write","path":"src/auto.ts","content":"export {}","allowWrite":true}',
+        workspace,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(approval.asked).toHaveLength(0)
+    })
+  })
+
+  test('should still ask for protected workspace files in auto mode', async () => {
+    await withTempWorkspace(async (workspace) => {
+      const approval = createApprovalSpy('denied')
+      const executor = new LocalToolExecutor(
+        approval.port,
+        undefined,
+        undefined,
+        undefined,
+        () => 'auto',
+      )
+      const result = await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"write","path":".env","content":"TOKEN=x","allowWrite":true}',
+        workspace,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(approval.asked[0]?.scope).toBe('protected')
+    })
+  })
+
+  test('should block file mutations without prompting in plan mode', async () => {
+    await withTempWorkspace(async (workspace) => {
+      const approval = createApprovalSpy('approved')
+      const executor = new LocalToolExecutor(
+        approval.port,
+        undefined,
+        undefined,
+        undefined,
+        () => 'plan',
+      )
+      const result = await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"write","path":"blocked.ts","content":"x","allowWrite":true}',
+        workspace,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.content).toContain('plan')
+      expect(approval.asked).toHaveLength(0)
+    })
+  })
+
+  test('should require approval for an absolute path outside the workspace', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'adnify-workspace-'))
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'adnify-outside-'))
+    const outsideFile = join(outsideRoot, 'notes.txt')
+    await writeFile(outsideFile, 'outside evidence', 'utf8')
+
+    try {
+      const approval = createApprovalSpy('approved')
+      const executor = new LocalToolExecutor(
+        approval.port,
+        undefined,
+        undefined,
+        undefined,
+        () => 'workspace',
+      )
+      const result = await executor.execute({
+        toolId: 'file-ops',
+        input: JSON.stringify({ action: 'read', path: outsideFile }),
+        workspace: createWorkspace(workspaceRoot),
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.content).toContain('outside evidence')
+      expect(approval.asked[0]).toMatchObject({ scope: 'outside', targetPath: outsideFile })
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  })
+
   test('should ask for approval before writing and skip the write when denied', async () => {
     await withTempWorkspace(async (workspace) => {
       const approval = createApprovalSpy('denied')
@@ -356,6 +575,7 @@ describe('LocalToolExecutor approval gate', () => {
         toolId: 'file-ops',
         input: '{"action":"write","path":"tracked.txt","content":"second","allowWrite":true}',
         workspace,
+        sessionId: 'session-checkpoint',
       })
 
       // The newest snapshot holds the content as it was before the second write.
@@ -365,6 +585,11 @@ describe('LocalToolExecutor approval gate', () => {
         relativePath: 'tracked.txt',
         originalContent: 'first',
       })
+      expect(snapshots[0].metadata).toMatchObject({
+        sessionId: 'session-checkpoint',
+        toolId: 'file-ops',
+      })
+      expect(snapshots[0].metadata?.toolInput).toContain('tracked.txt')
 
       // Rolling it back returns the file to its pre-overwrite state.
       checkpoints.restore(snapshots[0].id)

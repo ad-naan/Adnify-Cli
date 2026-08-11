@@ -10,7 +10,7 @@ import type {
 import type { CliConfigPort } from '../../application/ports/CliConfigPort'
 import type { LoggerPort } from '../../application/ports/LoggerPort'
 import type { ModelGatewayPort, ModelMessage } from '../../application/ports/ModelGatewayPort'
-import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
+import type { ToolExecutionResult, ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
 import type { ContextCompactionPort } from '../../application/ports/ContextCompactionPort'
 import type { CodeIndexerPort, RepoMapBuilderPort } from '../../application/ports/CodeIndexerPort'
 import type { SkillService } from '../skills/SkillService'
@@ -27,6 +27,9 @@ import type { ConversationSession } from '../../domain/session/aggregates/Conver
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import type { HookPort } from '../../application/ports/HookPort'
 import { loadProjectInstructions } from '../prompt/loadProjectInstructions'
+import { classifyShellCommand } from '../tooling/classifyShellCommand'
+
+type WorkflowPhase = 'plan' | 'execute'
 
 export class ModelAssistantResponder implements AssistantResponderPort {
   private readonly maxAgentTurns = 20
@@ -92,6 +95,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
     try {
       let activeMessages = [...messages]
+      const canRunVerification = command.toolCatalog.some((tool) => tool.id === 'shell-runner')
+      let verificationRequired = false
+      let verificationNudgeSent = false
+      let workflowPhase: WorkflowPhase = command.session.mode === 'plan' ? 'plan' : 'execute'
 
       for (let turn = 0; turn < this.maxAgentTurns; turn += 1) {
         // Auto-compaction: if context is approaching the token limit, compress
@@ -142,7 +149,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         // 输出那个标签，解析器就是个透传。
         const streamParser = new StreamingToolCallParser()
         let accumulated = ''
-        let nativeToolCall: { name: string; input: string } | null = null
+        let nativeToolCall: { toolCallId: string; name: string; input: string } | null = null
 
         for await (const chunk of this.gateway.streamChat({
           messages: activeMessages,
@@ -158,7 +165,11 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
           if (chunk.toolCall && !nativeToolCall) {
             // 一轮只执行一个工具调用 —— 与审批流程和回填顺序保持一致。
-            nativeToolCall = { name: chunk.toolCall.toolName, input: chunk.toolCall.input }
+            nativeToolCall = {
+              toolCallId: chunk.toolCall.toolCallId,
+              name: chunk.toolCall.toolName,
+              input: chunk.toolCall.input,
+            }
           }
 
           accumulated += chunk.delta
@@ -191,9 +202,75 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         const toolCall =
           nativeToolCall ?? flushResult.toolCall ?? parseToolCallMarkup(responseText)
 
+        if (!toolCall && verificationRequired && !verificationNudgeSent) {
+          verificationNudgeSent = true
+          activeMessages = [
+            ...activeMessages,
+            { role: 'assistant', content: responseText },
+            {
+              role: 'user',
+              content: [
+                'You successfully modified workspace files but have not attempted verification yet.',
+                'Before giving the final answer, use shell-runner to run the narrowest relevant test, typecheck, lint, or build command.',
+                'If verification cannot run or fails, report that evidence explicitly in the final answer.',
+              ].join('\n'),
+            },
+          ]
+          yield {
+            kind: 'transcript',
+            delta: '',
+            transcript: createCliNoticeContent(
+              this.i18n.locale === 'en'
+                ? 'Files changed. Running a verification pass before finishing.'
+                : '文件已修改，结束前正在执行验证检查。',
+              {
+                title: this.i18n.locale === 'en' ? 'Verification required' : '需要验证',
+                tone: 'info',
+              },
+            ),
+            done: false,
+          }
+          continue
+        }
+
         if (!toolCall) {
           yield { kind: 'text', delta: '', done: true }
           return
+        }
+
+        if (toolCall.name === 'workflow-phase') {
+          const transition = resolveWorkflowTransition(toolCall.input, command.session.mode, workflowPhase)
+          if (transition.ok) workflowPhase = transition.phase
+
+          yield {
+            kind: 'transcript',
+            delta: '',
+            workflowPhase: transition.ok ? transition.phase : undefined,
+            transcript: createCliNoticeContent(transition.message, {
+              title: transition.ok
+                ? this.i18n.locale === 'en'
+                  ? `Workflow · ${transition.phase}`
+                  : `工作阶段 · ${transition.phase === 'plan' ? '规划' : '执行'}`
+                : this.i18n.locale === 'en'
+                  ? 'Workflow phase rejected'
+                  : '工作阶段切换被拒绝',
+              tone: transition.ok ? 'info' : 'warning',
+            }),
+            done: false,
+          }
+
+          activeMessages = appendToolResultMessages(
+            activeMessages,
+            nativeToolCall,
+            responseText,
+            toolCall,
+            {
+              toolId: toolCall.name,
+              ok: transition.ok,
+              content: transition.message,
+            },
+          )
+          continue
         }
 
         yield {
@@ -247,29 +324,54 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
         // 长工具（子代理批次）在执行途中会推进度。回调里没法 yield，
         // 所以先进 channel，再由 drain 转成 transcript 事件推上屏。
-        const channel = new ToolProgressChannel((onProgress) =>
-          this.toolExecutor.execute({
+        let toolResult: ToolExecutionResult
+        if ((workflowPhase === 'plan' || command.session.mode === 'plan') && isExecutionToolCall(toolCall.name, toolCall.input)) {
+          toolResult = {
             toolId: toolCall.name,
-            input: toolCall.input,
-            workspace: command.workspace,
-            abortSignal: command.abortSignal,
-            onProgress,
-          }),
-        )
-
-        for await (const progress of channel.drain()) {
-          yield {
-            kind: 'transcript',
-            delta: '',
-            transcript: createCliNoticeContent(progress.message, {
-              title: `${this.i18n.t('transcript.tools')} · ${progress.toolId}`,
-              tone: progress.ok === false ? 'warning' : 'info',
-            }),
-            done: false,
+            ok: false,
+            content: [
+              'The current workflow phase is read-only planning.',
+              command.session.mode === 'plan'
+                ? 'The user explicitly selected plan mode, so execution cannot be enabled automatically.'
+                : 'Finish the actionable plan, then call workflow-phase with phase="execute" before modifying files or running execution commands.',
+            ].join(' '),
           }
+        } else {
+          const channel = new ToolProgressChannel((onProgress) =>
+            this.toolExecutor.execute({
+              toolId: toolCall.name,
+              input: toolCall.input,
+              workspace: command.workspace,
+              sessionId: command.session.id,
+              session: command.session,
+              abortSignal: command.abortSignal,
+              onProgress,
+            }),
+          )
+
+          for await (const progress of channel.drain()) {
+            yield {
+              kind: 'transcript',
+              delta: '',
+              transcript: createCliNoticeContent(progress.message, {
+                title: `${this.i18n.t('transcript.tools')} · ${progress.toolId}`,
+                tone: progress.ok === false ? 'warning' : 'info',
+              }),
+              done: false,
+            }
+          }
+
+          toolResult = await channel.result
         }
 
-        const toolResult = await channel.result
+        if (toolResult.ok && isMutatingFileCall(toolCall.name, toolCall.input) && canRunVerification) {
+          verificationRequired = true
+          verificationNudgeSent = false
+        } else if (verificationRequired && isVerificationCall(toolCall.name, toolCall.input)) {
+          // An attempted check closes the mandatory loop even when it fails; the model receives
+          // the failure and must explain it instead of repeatedly requesting the same approval.
+          verificationRequired = false
+        }
 
         const toolElapsedMs = Date.now() - toolStartTime
 
@@ -322,30 +424,42 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           done: false,
         }
 
-        // 回填这一轮的上下文。
-        // 原生模式下 responseText 经常是空的（模型只发了工具调用，没有正文），
-        // 直接塞进去会产生一条空的 assistant 消息 —— 部分 provider 会因此报 400。
-        // 所以补一行说明它调用了什么，而不是像回退模式那样把 XML 原样存回去。
-        const assistantContent = nativeToolCall
-          ? [responseText, `[called ${toolCall.name} with ${toolCall.input}]`]
-              .filter(Boolean)
-              .join('\n\n')
-          : responseText
-
-        activeMessages = [
-          ...activeMessages,
-          { role: 'assistant', content: assistantContent },
-          {
-            role: 'user',
-            content: [
-              `Tool result for ${toolResult.toolId}:`,
-              toolResult.ok ? 'status: ok' : 'status: failed',
-              toolResult.content,
-              '',
-              'Continue the task. If another tool is required, request one tool call only.',
-            ].join('\n'),
-          },
-        ]
+        // 原生 function calling 必须保留 toolCallId，并使用标准 tool role 回填。
+        // 文本协议仍保持 user 文本回填，以兼容那些连 tool-role 消息也不接受的 endpoint。
+        activeMessages = nativeToolCall
+          ? [
+              ...activeMessages,
+              {
+                role: 'assistant',
+                content: responseText,
+                toolCalls: [{
+                  toolCallId: nativeToolCall.toolCallId,
+                  toolName: nativeToolCall.name,
+                  input: nativeToolCall.input,
+                }],
+              },
+              {
+                role: 'tool',
+                content: toolResult.content,
+                toolCallId: nativeToolCall.toolCallId,
+                toolName: nativeToolCall.name,
+                ok: toolResult.ok,
+              },
+            ]
+          : [
+              ...activeMessages,
+              { role: 'assistant', content: responseText },
+              {
+                role: 'user',
+                content: [
+                  `Tool result for ${toolResult.toolId}:`,
+                  toolResult.ok ? 'status: ok' : 'status: failed',
+                  toolResult.content,
+                  '',
+                  'Continue the task. If another tool is required, request one tool call only.',
+                ].join('\n'),
+              },
+            ]
       }
 
       yield {
@@ -490,6 +604,9 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         'For web-search, use JSON like {"query":"React 19 features","limit":5}.',
         'For web-fetch, use JSON like {"url":"https://docs.example.com/api"}.',
         'For workspace-read, use JSON like {} or {"focus":"package.json"}.',
+        'For ask-user, provide 1-3 questions with 2-3 labeled options each. The terminal renders them as keyboard choice tabs.',
+        'For workflow-phase, use {"phase":"plan|execute","rationale":"short reason"}.',
+        'For runtime-control, choose one supported action and explain the reason. Never handle API keys through this tool.',
         '',
       )
     }
@@ -508,7 +625,11 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       '- After the tool result is returned, continue the task normally.',
       '- Prefer search-index for text search, glob-search for file discovery, file-ops for reading/editing, shell-runner for running checks.',
       '- Use web-search to find current documentation or solutions, then web-fetch to read specific pages.',
-      '- Available executable tools: workspace-read, search-index, glob-search, file-ops, shell-runner, web-search, web-fetch.',
+      '- Use ask-user only when a missing choice materially changes the result; do not ask for facts you can discover with tools.',
+      '- In agent mode, judge task complexity yourself. For multi-file, architectural, migration, or high-uncertainty work, call workflow-phase(plan), investigate and form an actionable plan, then call workflow-phase(execute) and implement. Skip the planning phase for simple, well-scoped changes.',
+      '- While the workflow phase is plan, the host blocks mutations and execution commands. Explicit session plan mode can never be promoted automatically.',
+      '- Use runtime-control when changing modes or settings would help the task. The host decides whether the change is automatic, asks the user, or is denied.',
+      '- Available executable tools: workspace-read, search-index, glob-search, file-ops, shell-runner, web-search, web-fetch, ask-user, workflow-phase, runtime-control.',
     )
 
     return promptParts.join('\n')
@@ -586,4 +707,139 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
     return `${normalized.slice(0, maxLength)}\n\n[truncated: ${omitted} of ${normalized.length} characters omitted]`
   }
+}
+
+function isMutatingFileCall(toolName: string, input: string): boolean {
+  if (toolName !== 'file-ops') return false
+  try {
+    const action = (JSON.parse(input) as { action?: unknown }).action
+    return action === 'write' || action === 'update' || action === 'patch'
+  } catch {
+    return false
+  }
+}
+
+function isVerificationCall(toolName: string, input: string): boolean {
+  if (toolName !== 'shell-runner') return false
+  try {
+    const argv = (JSON.parse(input) as { argv?: unknown }).argv
+    if (!Array.isArray(argv) || !argv.every((part) => typeof part === 'string')) return false
+    const command = argv.join(' ').toLowerCase()
+    return /(?:^|\s)(?:test|typecheck|lint|build|check)(?:\s|$)|\b(?:tsc|eslint|vitest|jest)\b/.test(command)
+  } catch {
+    return false
+  }
+}
+
+function resolveWorkflowTransition(
+  input: string,
+  sessionMode: 'chat' | 'agent' | 'plan',
+  currentPhase: WorkflowPhase,
+): { ok: true; phase: WorkflowPhase; message: string } | { ok: false; message: string } {
+  let parsed: { phase?: unknown; rationale?: unknown }
+  try {
+    parsed = JSON.parse(input) as { phase?: unknown; rationale?: unknown }
+  } catch {
+    return { ok: false, message: 'workflow-phase input must be valid JSON.' }
+  }
+
+  if (parsed.phase !== 'plan' && parsed.phase !== 'execute') {
+    return { ok: false, message: 'workflow-phase requires phase="plan" or phase="execute".' }
+  }
+
+  const rationale = typeof parsed.rationale === 'string' && parsed.rationale.trim()
+    ? parsed.rationale.trim()
+    : 'No rationale supplied.'
+
+  if (parsed.phase === 'execute' && sessionMode === 'plan') {
+    return {
+      ok: false,
+      message: 'The user explicitly selected session plan mode. AI cannot promote it to execution; ask the user to switch modes.',
+    }
+  }
+
+  if (parsed.phase === currentPhase) {
+    return { ok: true, phase: currentPhase, message: `Workflow already in ${currentPhase} phase. ${rationale}` }
+  }
+
+  return {
+    ok: true,
+    phase: parsed.phase,
+    message: parsed.phase === 'plan'
+      ? `Entered read-only planning phase. ${rationale}`
+      : `Planning complete; resumed execution under the user's existing permission policy. ${rationale}`,
+  }
+}
+
+function isExecutionToolCall(toolName: string, input: string): boolean {
+  if (isMutatingFileCall(toolName, input) || toolName.startsWith('mcp__')) return true
+
+  if (toolName === 'shell-runner') {
+    try {
+      const argv = (JSON.parse(input) as { argv?: unknown }).argv
+      if (!Array.isArray(argv) || !argv.every((part) => typeof part === 'string')) return true
+      const classification = classifyShellCommand(argv)
+      return !classification.ok || classification.riskLevel !== 'safe'
+    } catch {
+      return true
+    }
+  }
+
+  if (toolName === 'task') {
+    try {
+      const tasks = (JSON.parse(input) as { tasks?: unknown }).tasks
+      return Array.isArray(tasks) && tasks.some((task) => (
+        typeof task === 'object' && task !== null && (task as { role?: unknown }).role === 'implement'
+      ))
+    } catch {
+      return true
+    }
+  }
+
+  return false
+}
+
+function appendToolResultMessages(
+  messages: ModelMessage[],
+  nativeToolCall: { toolCallId: string; name: string; input: string } | null,
+  responseText: string,
+  toolCall: { name: string; input: string },
+  result: ToolExecutionResult,
+): ModelMessage[] {
+  if (nativeToolCall) {
+    return [
+      ...messages,
+      {
+        role: 'assistant',
+        content: responseText,
+        toolCalls: [{
+          toolCallId: nativeToolCall.toolCallId,
+          toolName: nativeToolCall.name,
+          input: nativeToolCall.input,
+        }],
+      },
+      {
+        role: 'tool',
+        content: result.content,
+        toolCallId: nativeToolCall.toolCallId,
+        toolName: nativeToolCall.name,
+        ok: result.ok,
+      },
+    ]
+  }
+
+  return [
+    ...messages,
+    { role: 'assistant', content: responseText },
+    {
+      role: 'user',
+      content: [
+        `Tool result for ${result.toolId}:`,
+        result.ok ? 'status: ok' : 'status: failed',
+        result.content,
+        '',
+        'Continue the task. If another tool is required, request one tool call only.',
+      ].join('\n'),
+    },
+  ]
 }

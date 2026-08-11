@@ -37,6 +37,7 @@ export interface StreamingCallbacks {
   onChunk: (delta: string) => void
   onTranscript?: (content: string) => void
   onApproval?: (approval: PendingToolApproval) => void
+  onWorkflowPhase?: (phase: 'plan' | 'execute') => void
   onDone: (fullContent: string) => void
   onError: (error: Error) => void
 }
@@ -149,6 +150,7 @@ export class SubmitPromptUseCase {
       delta: string
       transcript?: string
       approval?: PendingToolApproval
+      workflowPhase?: 'plan' | 'execute'
     }>,
     callbacks: StreamingCallbacks,
     abortSignal?: AbortSignal,
@@ -158,6 +160,10 @@ export class SubmitPromptUseCase {
 
     try {
       for await (const chunk of stream) {
+        if (chunk.workflowPhase) {
+          callbacks.onWorkflowPhase?.(chunk.workflowPhase)
+        }
+
         if (chunk.transcript) {
           session.addSystemMessage(this.idGenerator.next(), this.clock.now(), chunk.transcript)
           callbacks.onTranscript?.(chunk.transcript)

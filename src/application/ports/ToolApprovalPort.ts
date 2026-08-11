@@ -2,6 +2,7 @@ import type {
   ToolActionIntent,
   ToolApprovalDecision,
 } from '../../domain/tooling/value-objects/ToolApproval'
+import type { PermissionMode } from '../dto/UiPreferences'
 
 /**
  * 高风险工具执行前向用户征求同意。
@@ -23,4 +24,6 @@ export interface ToolApprovalController {
   resolvePending(decision: ToolApprovalDecision): boolean
   /** 中止时清空所有待决审批，避免执行流永久挂起。 */
   denyAllPending(): void
+  getMode(): PermissionMode
+  setMode(mode: PermissionMode): void
 }

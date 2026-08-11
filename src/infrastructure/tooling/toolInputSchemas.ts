@@ -147,7 +147,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
         minItems: 1,
         maxItems: 8,
         description:
-          'Independent research subtasks. Each runs in isolated context with read-only workspace search and file access.',
+          'Independent subtasks. Research roles are read-only; implement roles use disposable git worktrees.',
         items: {
           type: 'object',
           properties: {
@@ -171,7 +171,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
             },
             role: {
               type: 'string',
-              enum: ['general', 'explore', 'review', 'test'],
+              enum: ['general', 'explore', 'review', 'test', 'implement'],
               description: 'Specialized read-only behavior for the subtask. Defaults to "general".',
             },
           },
@@ -187,6 +187,76 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
     required: ['tasks'],
+    additionalProperties: false,
+  },
+  'ask-user': {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 3,
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            header: { type: 'string', description: 'Short label, ideally under 12 characters.' },
+            question: { type: 'string' },
+            options: {
+              type: 'array',
+              minItems: 2,
+              maxItems: 3,
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  description: { type: 'string' },
+                },
+                required: ['label', 'description'],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ['id', 'header', 'question', 'options'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['questions'],
+    additionalProperties: false,
+  },
+  'workflow-phase': {
+    type: 'object',
+    properties: {
+      phase: {
+        type: 'string',
+        enum: ['plan', 'execute'],
+        description: 'Enter read-only planning or resume implementation for the current turn.',
+      },
+      rationale: {
+        type: 'string',
+        description: 'Short user-facing reason for the phase change.',
+      },
+    },
+    required: ['phase', 'rationale'],
+    additionalProperties: false,
+  },
+  'runtime-control': {
+    type: 'object',
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['inspect', 'set-assistant-mode', 'set-permission-mode', 'set-language', 'set-animation', 'switch-model'],
+      },
+      value: {
+        type: 'string',
+        description: 'Mode, locale, or animation value for the selected action.',
+      },
+      provider: { type: 'string', description: 'Configured provider name for switch-model.' },
+      model: { type: 'string', description: 'Optional model name for switch-model.' },
+      rationale: { type: 'string', description: 'Short user-facing reason for the change.' },
+    },
+    required: ['action', 'rationale'],
     additionalProperties: false,
   },
 }

@@ -1,4 +1,5 @@
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
+import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 
 /**
  * 执行途中的一条进度消息。
@@ -18,6 +19,10 @@ export interface ToolExecutionRequest {
   toolId: string
   input: string
   workspace: WorkspaceContext
+  /** Session that initiated the operation, persisted into recovery checkpoints when available. */
+  sessionId?: string
+  /** Live session aggregate, used only by host-owned runtime controls such as mode switching. */
+  session?: ConversationSession
   /** Propagates user cancellation into long-running tools such as sub-agent batches. */
   abortSignal?: AbortSignal
   approvalGranted?: boolean

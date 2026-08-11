@@ -1,4 +1,4 @@
-import type { UiPreferences, AnimationLevel } from '../../application/dto/UiPreferences'
+import type { UiPreferences, AnimationLevel, PermissionMode } from '../../application/dto/UiPreferences'
 
 function resolveAnimationLevel(input?: string | null): AnimationLevel {
   const normalized = input?.trim().toLowerCase()
@@ -21,11 +21,25 @@ function resolveAnimationLevel(input?: string | null): AnimationLevel {
   }
 }
 
+function resolvePermissionMode(input?: string | null): PermissionMode {
+  switch (input?.trim().toLowerCase()) {
+    case 'manual':
+    case 'workspace':
+    case 'auto':
+    case 'plan':
+      return input.trim().toLowerCase() as PermissionMode
+    default:
+      return 'workspace'
+  }
+}
+
 export function resolveUiPreferences(
   env: Record<string, string | undefined> = process.env,
   persistedAnimationLevel?: string | null,
+  persistedPermissionMode?: string | null,
 ): UiPreferences {
   return {
     animationLevel: resolveAnimationLevel(env.ADNIFY_ANIMATION_LEVEL ?? persistedAnimationLevel),
+    permissionMode: resolvePermissionMode(env.ADNIFY_PERMISSION_MODE ?? persistedPermissionMode),
   }
 }

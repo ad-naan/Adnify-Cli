@@ -12,7 +12,7 @@ import {
   isLikelyTextPath,
   parseJsonObject,
   replaceFirst,
-  resolveWorkspacePath,
+  resolveFileToolPath,
 } from '../toolPathGuard'
 import { describeError, toolFailure, toolSuccess } from './ToolHandler'
 
@@ -21,6 +21,7 @@ export interface FileOpsRequest {
   action: string
   prompt: Record<string, unknown>
   resolvedPath: string
+  scope: 'workspace' | 'outside'
   request: ToolExecutionRequest
 }
 
@@ -30,16 +31,19 @@ export function parseFileOpsRequest(
   const prompt = parseJsonObject(request.input)
   const action = typeof prompt.action === 'string' ? prompt.action.trim().toLowerCase() : 'read'
   const rawPath = typeof prompt.path === 'string' ? prompt.path.trim() : '.'
-  const resolvedPath = resolveWorkspacePath(request.workspace.rootPath, rawPath)
+  const resolved = resolveFileToolPath(request.workspace.rootPath, rawPath)
 
-  if (!resolvedPath) {
+  if (!resolved) {
     return {
       ok: false,
       result: toolFailure(request.toolId, 'Path must stay inside the current workspace.'),
     }
   }
 
-  return { ok: true, value: { action, prompt, resolvedPath, request } }
+  return {
+    ok: true,
+    value: { action, prompt, resolvedPath: resolved.resolvedPath, scope: resolved.scope, request },
+  }
 }
 
 export async function runFileOps(input: FileOpsRequest): Promise<ToolExecutionResult> {

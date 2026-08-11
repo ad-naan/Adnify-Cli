@@ -805,10 +805,86 @@ describe('ModelAssistantResponder native tool calls', () => {
     expect(second).not.toBeUndefined()
     const replayed = second?.messages ?? []
     const assistantTurn = replayed[replayed.length - 2]
-    // 原生模式下模型可能只发工具调用、没有正文。空 content 会让部分 provider 直接 400。
     expect(assistantTurn?.role).toBe('assistant')
-    expect(assistantTurn?.content).toContain('shell-runner')
-    expect(replayed[replayed.length - 1]?.content).toContain('no changes')
+    expect(assistantTurn?.role === 'assistant' ? assistantTurn.toolCalls?.[0] : undefined).toEqual({
+      toolCallId: 'c1',
+      toolName: 'shell-runner',
+      input: '{"argv":["git","diff"]}',
+    })
+    const toolTurn = replayed[replayed.length - 1]
+    expect(toolTurn?.role).toBe('tool')
+    expect(toolTurn?.content).toContain('no changes')
+  })
+
+  test('requires a verification attempt after a successful file mutation', async () => {
+    const capturedRequests: ModelRequest[] = []
+    const executedCalls: ToolExecutionRequest[] = []
+    let invocation = 0
+
+    const gateway: ModelGatewayPort = {
+      async *streamChat(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
+        capturedRequests.push(request)
+        invocation += 1
+
+        if (invocation === 1) {
+          yield {
+            delta: '',
+            toolCall: {
+              toolCallId: 'write-1',
+              toolName: 'file-ops',
+              input: '{"action":"write","path":"src/new.ts","content":"export {}","allowWrite":true}',
+            },
+            usedNativeTools: true,
+          }
+          return
+        }
+        if (invocation === 2) {
+          yield { delta: 'Implemented.', finishReason: 'stop', usedNativeTools: true }
+          return
+        }
+        if (invocation === 3) {
+          yield {
+            delta: '',
+            toolCall: {
+              toolCallId: 'verify-1',
+              toolName: 'shell-runner',
+              input: '{"argv":["npm","run","typecheck"]}',
+            },
+            usedNativeTools: true,
+          }
+          return
+        }
+        yield { delta: 'Implemented and verified.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request): Promise<ToolExecutionResult> {
+        executedCalls.push(request)
+        return { toolId: request.toolId, ok: true, content: 'ok' }
+      },
+    }
+
+    const fileTool = new ToolDescriptor({
+      id: 'file-ops',
+      name: 'File Ops',
+      description: 'Edit files',
+      category: 'filesystem',
+      riskLevel: 'careful',
+    })
+
+    for await (const _chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'implement it',
+      session: createSession('native-verify'),
+      workspace: createWorkspace(),
+      toolCatalog: [...CATALOG, fileTool],
+    })) {
+      // consume
+    }
+
+    expect(executedCalls.map((call) => call.toolId)).toEqual(['file-ops', 'shell-runner'])
+    expect(capturedRequests).toHaveLength(4)
+    expect(capturedRequests[2]?.messages.at(-1)?.content).toContain('have not attempted verification')
   })
 
   test('streams tool progress to the transcript before the final result', async () => {
@@ -866,5 +942,91 @@ describe('ModelAssistantResponder native tool calls', () => {
     expect(startedAt).toBeGreaterThan(-1)
     expect(completedAt).toBeGreaterThan(startedAt)
     expect(resultAt).toBeGreaterThan(completedAt)
+  })
+
+  test('lets the model plan read-only, then resume execution for a complex task', async () => {
+    let invocation = 0
+    const executed: string[] = []
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        invocation += 1
+        if (invocation === 1) {
+          yield { delta: '', toolCall: { toolCallId: 'p1', toolName: 'workflow-phase', input: '{"phase":"plan","rationale":"cross-file migration"}' }, usedNativeTools: true }
+          return
+        }
+        if (invocation === 2) {
+          yield { delta: '', toolCall: { toolCallId: 'blocked', toolName: 'shell-runner', input: '{"argv":["npm","run","typecheck"]}' }, usedNativeTools: true }
+          return
+        }
+        if (invocation === 3) {
+          yield { delta: '', toolCall: { toolCallId: 'p2', toolName: 'workflow-phase', input: '{"phase":"execute","rationale":"plan is actionable"}' }, usedNativeTools: true }
+          return
+        }
+        if (invocation === 4) {
+          yield { delta: '', toolCall: { toolCallId: 'run', toolName: 'shell-runner', input: '{"argv":["npm","run","typecheck"]}' }, usedNativeTools: true }
+          return
+        }
+        yield { delta: 'Planned and executed.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request) {
+        executed.push(request.toolId)
+        return { toolId: request.toolId, ok: true, content: 'verified' }
+      },
+    }
+
+    const phases: string[] = []
+    for await (const chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'perform a complex migration',
+      session: createSession('adaptive-phase'),
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      if (chunk.workflowPhase) phases.push(chunk.workflowPhase)
+    }
+
+    expect(phases).toEqual(['plan', 'execute'])
+    expect(executed).toEqual(['shell-runner'])
+  })
+
+  test('does not let AI promote an explicitly selected session plan mode', async () => {
+    let invocation = 0
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        invocation += 1
+        if (invocation === 1) {
+          yield { delta: '', toolCall: { toolCallId: 'p1', toolName: 'workflow-phase', input: '{"phase":"execute","rationale":"start implementation"}' }, usedNativeTools: true }
+          return
+        }
+        if (invocation === 2) {
+          yield { delta: '', toolCall: { toolCallId: 'blocked', toolName: 'shell-runner', input: '{"argv":["npm","run","typecheck"]}' }, usedNativeTools: true }
+          return
+        }
+        yield { delta: 'Execution remains disabled.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+    const executed: string[] = []
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request) {
+        executed.push(request.toolId)
+        return { toolId: request.toolId, ok: true, content: 'unexpected' }
+      },
+    }
+    const session = createSession('explicit-plan')
+    session.switchMode('plan', new Date('2026-01-01T00:00:01.000Z'))
+    const transcripts: string[] = []
+
+    for await (const chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'plan only',
+      session,
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      if (chunk.transcript) transcripts.push(chunk.transcript)
+    }
+
+    expect(executed).toEqual([])
+    expect(transcripts.join('\n')).toContain('cannot promote it to execution')
   })
 })

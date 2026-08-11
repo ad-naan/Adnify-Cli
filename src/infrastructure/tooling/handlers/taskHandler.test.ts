@@ -85,6 +85,14 @@ describe('parseTaskRequest', () => {
 
     expect(parsed.tasks[0]?.role).toBe('review')
   })
+
+  test('accepts an implementation-proposal role', () => {
+    const parsed = parseOrThrow(
+      JSON.stringify({ tasks: [{ title: 'implement', instruction: 'design the patch', role: 'implement' }] }),
+    )
+
+    expect(parsed.tasks[0]?.role).toBe('implement')
+  })
 })
 
 describe('formatTaskPreview', () => {
@@ -103,9 +111,23 @@ describe('formatTaskPreview', () => {
     expect(preview).toContain('Dispatches 2 sub-agents')
     expect(preview).toContain('1. Audit logging')
     expect(preview).toContain('2. Audit errors')
-    // 用户要知道子代理只能做只读研究，否则这个审批没法判断。
+    // 没有 implement 角色时，用户要明确知道这些任务保持只读。
     expect(preview).toContain('read-only workspace tools')
     expect(preview).toContain('cannot modify files')
+  })
+
+  test('explains disposable worktree isolation for implementation workers', () => {
+    const preview = formatTaskPreview(
+      parseOrThrow(
+        JSON.stringify({
+          tasks: [{ title: 'Implement auth', instruction: 'edit it', role: 'implement' }],
+        }),
+      ),
+    )
+
+    expect(preview).toContain('1 implementation worker')
+    expect(preview).toContain('disposable Git worktrees')
+    expect(preview).toContain('other roles remain read-only')
   })
 })
 
