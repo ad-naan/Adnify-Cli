@@ -62,7 +62,7 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 - **Risk-Tiered Approval** — Pauses before file writes and command execution — the model doesn't decide, you do
 - **Cross-Session Memory** — `:memory` stores project knowledge, auto-injected into future sessions
 - **Checkpoints & Undo** — `:checkpoint` / `:undo` / `:restore` with Git-independent file-level snapshots
-- **Context Window Diagnostics** — `:context` for real-time message count, token estimation, and health
+- **Context Window Diagnostics** — separates response output limits from the context window, shows `used/window`, and rejects summaries that do not create real headroom
 - **Bilingual i18n** — Switch between Chinese and English interface
 - **Prompt Pack** — All system prompts, tool definitions, and commands live in `prompts/` as editable Markdown
 - **Native Tool Calling** — Uses provider-native function calling first, falls back to text parsing automatically
@@ -75,12 +75,14 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 | Key | Behavior |
 |---|---|
 | `Ctrl+O` | Open / close fullscreen transcript |
+| `Shift+Tab` | Open the bottom-dock Chat / Agent / Plan mode picker |
 | `PgUp / PgDn` | Scroll long conversations one viewport at a time |
 | `Esc` | Abort active work; return to bottom while browsing; exit transcript when at bottom |
 | `Tab / Enter` | Fill in command from the panel without executing |
 | `← / → / ↑ / ↓` | Move between bottom-dock choice tabs |
 
 - Regular conversations show compact tool summaries; full inputs, outputs, and elapsed time available in fullscreen transcript
+- Context compaction never deletes the persisted conversation; `Ctrl+O` opens the full record and `PgUp/PgDn` browses it
 - Approval and configuration prompts automatically exit transcript mode to keep critical actions visible
 
 ---

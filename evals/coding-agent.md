@@ -18,6 +18,8 @@ provider-independent, so it can run in CI without API keys or network access.
 | Interaction | Setup, approval, permissions, and `ask-user` share keyboard-navigable option tabs; multi-step answers return structured data. |
 | Adaptive workflow | The model may choose plan→execute for complex work; the host blocks mutations during planning and explicit user plan mode cannot be promoted silently. |
 | Runtime control | The agent can inspect and change non-secret CLI settings; capability increases and model switches pass through host approval. |
+| Context budget | Output-token limits and context-window capacity stay separate; compaction must save meaningful tokens and preserve the full persisted transcript. |
+| Plan artifacts | Plan mode may persist Markdown only under `.adnify/plans/`; source mutations require one approved transition to execution. |
 
 ## Live-model scorecard
 

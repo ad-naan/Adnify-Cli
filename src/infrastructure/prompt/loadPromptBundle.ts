@@ -33,6 +33,7 @@ export async function loadPromptBundle(): Promise<PromptBundle> {
     'tools/ask-user.md',
     'tools/workflow-phase.md',
     'tools/runtime-control.md',
+    'tools/plan-document.md',
   ]
 
   const tools = await Promise.all(

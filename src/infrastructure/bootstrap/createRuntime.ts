@@ -11,6 +11,7 @@ import { ListSessionsUseCase } from '../../application/use-cases/ListSessionsUse
 import { ResolveStartupSessionUseCase } from '../../application/use-cases/ResolveStartupSessionUseCase'
 import { SubmitPromptUseCase } from '../../application/use-cases/SubmitPromptUseCase'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
+import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ModelConfigStorePort } from '../../application/ports/ModelConfigStorePort'
 import type { ToolExecutorPort } from '../../application/ports/ToolExecutorPort'
 import { DefaultCliConfigAdapter } from '../config/DefaultCliConfigAdapter'
@@ -284,7 +285,13 @@ function createResponderStack(
   })
 
   const gateway = new AiSdkGateway(modelConfig, logger)
-  const compactor = new ModelContextCompactor(gateway, modelConfig.maxTokens, logger, modelConfig.model)
+  const compactor = new ModelContextCompactor(
+    gateway,
+    resolveContextWindowTokens(modelConfig),
+    logger,
+    modelConfig.model,
+    modelConfig.maxTokens,
+  )
   const responder = new ModelAssistantResponder(
     gateway,
     modelConfig,

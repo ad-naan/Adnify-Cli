@@ -1027,6 +1027,49 @@ describe('ModelAssistantResponder native tool calls', () => {
     }
 
     expect(executed).toEqual([])
-    expect(transcripts.join('\n')).toContain('cannot promote it to execution')
+    expect(transcripts.join('\n')).toContain('begin-execution')
+  })
+
+  test('continues execution after an approved begin-execution transition', async () => {
+    let invocation = 0
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        invocation += 1
+        if (invocation === 1) {
+          yield { delta: '', toolCall: { toolCallId: 'begin', toolName: 'runtime-control', input: '{"action":"begin-execution","rationale":"create the requested file"}' }, usedNativeTools: true }
+          return
+        }
+        if (invocation === 2) {
+          yield { delta: '', toolCall: { toolCallId: 'verify', toolName: 'shell-runner', input: '{"argv":["npm","run","typecheck"]}' }, usedNativeTools: true }
+          return
+        }
+        yield { delta: 'Execution resumed.', finishReason: 'stop', usedNativeTools: true }
+      },
+    }
+    const executed: string[] = []
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request) {
+        executed.push(request.toolId)
+        if (request.toolId === 'runtime-control') {
+          request.session?.switchMode('agent', new Date())
+          return { toolId: request.toolId, ok: true, content: 'Execution enabled.' }
+        }
+        return { toolId: request.toolId, ok: true, content: 'verified' }
+      },
+    }
+    const session = createSession('approved-transition')
+    session.switchMode('plan', new Date())
+
+    for await (const _chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'create the file',
+      session,
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      // consume
+    }
+
+    expect(executed).toEqual(['runtime-control', 'shell-runner'])
+    expect(session.mode).toBe('agent')
   })
 })

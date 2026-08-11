@@ -223,6 +223,7 @@ export function useConfigInit(i18n: AppI18n): ConfigInitState {
           baseUrl: current.baseUrl,
           model: current.model,
           maxTokens: 4096,
+          contextWindowTokens: 128000,
           temperature: 0.7,
           timeoutMs: 60_000,
         }

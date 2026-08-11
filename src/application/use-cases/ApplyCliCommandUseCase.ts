@@ -16,6 +16,7 @@ import type { StorageSettingsPort } from '../ports/StorageSettingsPort'
 import type { ToolApprovalController } from '../ports/ToolApprovalPort'
 import type { PermissionMode } from '../dto/UiPreferences'
 import type { ModelConfig, ModelProvider } from '../../domain/assistant/value-objects/ModelConfig'
+import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
@@ -24,6 +25,7 @@ import {
 } from '../support/CliTranscriptMarkup'
 import { formatWorkspaceSummary } from '../support/formatWorkspaceSummary'
 import { PROVIDER_PRESETS } from '../../infrastructure/config/providerPresets'
+import { estimateTokens } from '../../domain/session/value-objects/CompactionResult'
 
 const execFileAsync = promisify(execFile)
 
@@ -640,6 +642,7 @@ export class ApplyCliCommandUseCase {
           formatKeyValueLine('baseUrl', modelConfig.baseUrl),
           formatKeyValueLine('model', modelConfig.model),
           formatKeyValueLine('maxTokens', String(modelConfig.maxTokens)),
+          formatKeyValueLine('contextWindowTokens', String(resolveContextWindowTokens(modelConfig))),
           formatKeyValueLine('temperature', String(modelConfig.temperature)),
           formatKeyValueLine('timeout', `${modelConfig.timeoutMs}ms`),
           formatKeyValueLine('dataRoot', storage.dataRoot),
@@ -1087,7 +1090,7 @@ export class ApplyCliCommandUseCase {
         const systemMessages = messages.filter((m) => m.role === 'system')
 
         const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0)
-        const approxTokens = Math.ceil(totalChars / 4)
+        const approxTokens = estimateTokens(messages)
 
         const text = [
           'Context window summary:',
@@ -1097,9 +1100,10 @@ export class ApplyCliCommandUseCase {
           formatKeyValueLine('system', String(systemMessages.length)),
           formatKeyValueLine('totalChars', String(totalChars)),
           formatKeyValueLine('approxTokens', String(approxTokens)),
-          formatKeyValueLine('maxTokens', String(command.bootstrap.modelConfig.maxTokens)),
+          formatKeyValueLine('maxOutputTokens', String(command.bootstrap.modelConfig.maxTokens)),
+          formatKeyValueLine('contextWindowTokens', String(resolveContextWindowTokens(command.bootstrap.modelConfig))),
           '',
-          approxTokens > command.bootstrap.modelConfig.maxTokens * 0.7
+          approxTokens > resolveContextWindowTokens(command.bootstrap.modelConfig) * 0.75
             ? 'Warning: context is approaching token limit. Consider :clear to reset.'
             : 'Context looks healthy.',
         ].join('\n')
@@ -1659,6 +1663,7 @@ function formatConfigCommandHelp(i18n: AppI18n): string {
     i18n.t('cli.config.commandHelpSetApiKey'),
     i18n.t('cli.config.commandHelpSetBaseUrl'),
     i18n.t('cli.config.commandHelpSetMaxTokens'),
+    i18n.t('cli.config.commandHelpSetContextWindow'),
     i18n.t('cli.config.commandHelpSetTemperature'),
     i18n.t('cli.config.commandHelpSetTimeout'),
     i18n.t('cli.config.commandHelpClearApiKey'),
@@ -1746,6 +1751,22 @@ function updateModelConfigField(
         config: {
           ...config,
           maxTokens: parsed,
+        },
+      }
+    }
+    case 'context-window':
+    case 'context-window-tokens':
+    case 'contextwindow': {
+      const parsed = Number.parseInt(value, 10)
+      if (!Number.isFinite(parsed) || parsed < 4096) {
+        return { ok: false, message: i18n.t('cli.config.errorInvalidContextWindow', { value }) }
+      }
+
+      return {
+        ok: true,
+        config: {
+          ...config,
+          contextWindowTokens: parsed,
         },
       }
     }

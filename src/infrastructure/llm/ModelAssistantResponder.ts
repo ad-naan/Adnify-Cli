@@ -23,6 +23,7 @@ import { StreamingToolCallParser } from '../../application/support/StreamingTool
 import { toModelToolDefinitions } from '../tooling/toolInputSchemas'
 import { ToolProgressChannel } from './ToolProgressChannel'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
+import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import type { HookPort } from '../../application/ports/HookPort'
@@ -99,32 +100,36 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       let verificationRequired = false
       let verificationNudgeSent = false
       let workflowPhase: WorkflowPhase = command.session.mode === 'plan' ? 'plan' : 'execute'
+      let compactionAttempted = false
 
       for (let turn = 0; turn < this.maxAgentTurns; turn += 1) {
         // Auto-compaction: if context is approaching the token limit, compress
-        if (this.compactor && this.compactor.needsCompaction(activeMessages, this.config.maxTokens)) {
+        const contextWindowTokens = resolveContextWindowTokens(this.config)
+        if (!compactionAttempted && this.compactor && this.compactor.needsCompaction(activeMessages, contextWindowTokens)) {
+          compactionAttempted = true
           const result = await this.compactor.compact(
             activeMessages,
-            this.config.maxTokens,
+            contextWindowTokens,
             command.abortSignal,
           )
-          activeMessages = result.messages
-
-          yield {
-            kind: 'transcript',
-            delta: '',
-            transcript: createCliNoticeContent(
-              [
-                this.i18n.locale === 'en'
-                  ? `Context compressed: ${result.compactedCount} messages summarized (${result.tokensBefore} → ${result.tokensAfter} tokens).`
-                  : `上下文已压缩：摘要了 ${result.compactedCount} 条消息（${result.tokensBefore} → ${result.tokensAfter} tokens）。`,
-              ].join('\n'),
-              {
-                title: this.i18n.locale === 'en' ? 'Context Compacted' : '上下文已压缩',
-                tone: 'info',
-              },
-            ),
-            done: false,
+          if (result.compactedCount > 0) {
+            activeMessages = result.messages
+            yield {
+              kind: 'transcript',
+              delta: '',
+              transcript: createCliNoticeContent(
+                [
+                  this.i18n.locale === 'en'
+                    ? `Context compressed: ${result.compactedCount} messages summarized (${result.tokensBefore} → ${result.tokensAfter} tokens). Original conversation remains available: Ctrl+O opens the full transcript; PgUp/PgDn browses history.`
+                    : `上下文已压缩：摘要了 ${result.compactedCount} 条消息（${result.tokensBefore} → ${result.tokensAfter} tokens）。原始会话仍然保留：Ctrl+O 打开完整记录，PgUp/PgDn 浏览历史。`,
+                ].join('\n'),
+                {
+                  title: this.i18n.locale === 'en' ? 'Context Compacted' : '上下文已压缩',
+                  tone: 'info',
+                },
+              ),
+              done: false,
+            }
           }
         }
         // Hook: beforeModelRequest (a before* hook returning false aborts)
@@ -364,6 +369,9 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           toolResult = await channel.result
         }
 
+        const resumedExecution = toolResult.ok && isBeginExecutionCall(toolCall.name, toolCall.input)
+        if (resumedExecution) workflowPhase = 'execute'
+
         if (toolResult.ok && isMutatingFileCall(toolCall.name, toolCall.input) && canRunVerification) {
           verificationRequired = true
           verificationNudgeSent = false
@@ -403,6 +411,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         yield {
           kind: 'transcript',
           delta: '',
+          workflowPhase: resumedExecution ? 'execute' : undefined,
           transcript: createCliCommandOutputContent(
             [
               toolResult.ok
@@ -607,6 +616,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         'For ask-user, provide 1-3 questions with 2-3 labeled options each. The terminal renders them as keyboard choice tabs.',
         'For workflow-phase, use {"phase":"plan|execute","rationale":"short reason"}.',
         'For runtime-control, choose one supported action and explain the reason. Never handle API keys through this tool.',
+        'For plan-document, use write/read/list; documents stay under .adnify/plans/.',
         '',
       )
     }
@@ -629,7 +639,9 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       '- In agent mode, judge task complexity yourself. For multi-file, architectural, migration, or high-uncertainty work, call workflow-phase(plan), investigate and form an actionable plan, then call workflow-phase(execute) and implement. Skip the planning phase for simple, well-scoped changes.',
       '- While the workflow phase is plan, the host blocks mutations and execution commands. Explicit session plan mode can never be promoted automatically.',
       '- Use runtime-control when changing modes or settings would help the task. The host decides whether the change is automatic, asks the user, or is denied.',
-      '- Available executable tools: workspace-read, search-index, glob-search, file-ops, shell-runner, web-search, web-fetch, ask-user, workflow-phase, runtime-control.',
+      '- If the user requests a mutation while explicit session or permission plan mode is active, call runtime-control(begin-execution). Do not merely tell the user to type :mode or :permissions. One host approval resumes execution.',
+      '- Plan mode may write planning artifacts only through plan-document. Store them under .adnify/plans/; source files remain read-only until execution is approved.',
+      '- Available executable tools: workspace-read, search-index, glob-search, file-ops, shell-runner, web-search, web-fetch, ask-user, workflow-phase, runtime-control, plan-document.',
     )
 
     return promptParts.join('\n')
@@ -731,6 +743,15 @@ function isVerificationCall(toolName: string, input: string): boolean {
   }
 }
 
+function isBeginExecutionCall(toolName: string, input: string): boolean {
+  if (toolName !== 'runtime-control') return false
+  try {
+    return (JSON.parse(input) as { action?: unknown }).action === 'begin-execution'
+  } catch {
+    return false
+  }
+}
+
 function resolveWorkflowTransition(
   input: string,
   sessionMode: 'chat' | 'agent' | 'plan',
@@ -754,7 +775,7 @@ function resolveWorkflowTransition(
   if (parsed.phase === 'execute' && sessionMode === 'plan') {
     return {
       ok: false,
-      message: 'The user explicitly selected session plan mode. AI cannot promote it to execution; ask the user to switch modes.',
+      message: 'The user explicitly selected session plan mode. Use runtime-control with action="begin-execution" so the host can request keyboard approval; do not ask the user to type a command.',
     }
   }
 

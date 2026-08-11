@@ -21,6 +21,7 @@ interface RawConfigFile {
     baseUrl?: string
     model?: string
     maxTokens?: number
+    contextWindowTokens?: number
     temperature?: number
     timeoutMs?: number
   }
@@ -49,6 +50,7 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
   maxTokens: 4096,
+  contextWindowTokens: 128_000,
   temperature: 0.7,
   timeoutMs: 60_000,
 }
@@ -100,6 +102,12 @@ export async function loadModelConfig(options: LoadLocalConfigOptions = {}): Pro
     baseUrl: env['ADNIFY_BASE_URL'] ?? model.baseUrl ?? DEFAULT_MODEL_CONFIG.baseUrl,
     model: env['ADNIFY_MODEL'] ?? model.model ?? DEFAULT_MODEL_CONFIG.model,
     maxTokens: normalizeInteger(model.maxTokens, DEFAULT_MODEL_CONFIG.maxTokens, 1, 200_000),
+    contextWindowTokens: normalizeInteger(
+      env['ADNIFY_CONTEXT_WINDOW_TOKENS'] ? Number(env['ADNIFY_CONTEXT_WINDOW_TOKENS']) : model.contextWindowTokens,
+      DEFAULT_MODEL_CONFIG.contextWindowTokens ?? 128_000,
+      4_096,
+      2_000_000,
+    ),
     temperature: normalizeNumber(model.temperature, DEFAULT_MODEL_CONFIG.temperature, 0, 2),
     timeoutMs: normalizeInteger(model.timeoutMs, DEFAULT_MODEL_CONFIG.timeoutMs, 1_000, 600_000),
   }

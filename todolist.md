@@ -76,6 +76,10 @@
 - [x] 新增 `ask-user` 多步选项卡工具，结构化答案回填 Agent 工具链
 - [x] 新增 AI 自适应 plan→execute 工作阶段，规划阶段由宿主强制只读
 - [x] 新增 `runtime-control`，AI 可按风险自主操作模式、语言、动效、权限和已配置模型
+- [x] 分离单次输出上限与上下文窗口，默认 128k，并拒绝无收益压缩
+- [x] 状态栏显示上下文 used/window，压缩提示明确 Ctrl+O/PgUp 展开方式
+- [x] Plan 模式可写 `.adnify/plans/` 规划文档，源码仍保持只读
+- [x] Shift+Tab 打开统一的 Chat / Agent / Plan 底部模式选项卡
 - [x] `implement` 子代理使用 disposable git worktree 修改和验证，结束后回传 patch
 - [x] 文件级检查点（`:restore`），独立于 git 检查点
 - [x] 写入 diff 预览与命令风险展开

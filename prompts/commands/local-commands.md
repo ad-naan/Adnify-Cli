@@ -19,6 +19,7 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :config set model [value]
 - :config set api-key [value]
 - :config set base-url [value]
+- :config set context-window [tokens]
 - :config clear api-key
 - :language [zh-CN|en]
 - :animation [off|minimal|full]

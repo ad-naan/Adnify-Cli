@@ -12,6 +12,7 @@ import { useConfigInit } from './useConfigInit'
 import { useToolApproval } from './useToolApproval'
 import { useUserInteraction } from './useUserInteraction'
 import { usePermissionPicker } from './usePermissionPicker'
+import { useAssistantModePicker } from './useAssistantModePicker'
 
 export interface UseCliControllerParams {
   runtime: AdnifyCliRuntime
@@ -149,6 +150,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   )
   const userInteraction = useUserInteraction(params.runtime.userInteraction)
   const permissionPicker = usePermissionPicker(i18n, params.runtime.toolApproval)
+  const assistantModePicker = useAssistantModePicker(i18n, session?.mode ?? 'agent')
 
   const flushStreamingBuffer = useCallback(() => {
     if (streamingFlushTimerRef.current) {
@@ -313,6 +315,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const isSuggestionOpen =
     commandSuggestions.length > 0 &&
     !configInit.isActive &&
+    !assistantModePicker.isActive &&
     !permissionPicker.isActive &&
     !userInteraction.isActive &&
     !toolApproval.isActive &&
@@ -623,9 +626,39 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     }
   }, [bootstrap, params.runtime, permissionPicker, session])
 
+  const applyAssistantModeSelection = useCallback(async () => {
+    if (!session || !bootstrap) return
+    const mode = assistantModePicker.selectedMode
+    assistantModePicker.close()
+    busyRef.current = true
+    setIsBusy(true)
+    try {
+      const result = await params.runtime.useCases.applyCliCommand.execute({
+        sessionId: session.id,
+        commandLine: `:mode ${mode}`,
+        bootstrap,
+      })
+      setSession(result.session)
+      setStatusLine(result.statusLine)
+    } catch (error) {
+      setStatusLine(error instanceof Error ? error.message : String(error))
+    } finally {
+      busyRef.current = false
+      setIsBusy(false)
+    }
+  }, [assistantModePicker, bootstrap, params.runtime.useCases.applyCliCommand, session])
+
   const handleInput = useCallback((input: string, key: Key) => {
     if (key.ctrl && input === 'c') {
       params.onExit()
+      return
+    }
+
+    if (key.shift && key.tab && !busyRef.current) {
+      if (!toolApproval.isActive && !userInteraction.isActive && !configInit.isActive && !permissionPicker.isActive) {
+        assistantModePicker.open()
+        setStatusLine(i18n.t('status.selectAssistantMode'))
+      }
       return
     }
 
@@ -637,6 +670,12 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         }
         // 有在途审批时必须一并拒绝，否则工具那边的 promise 永不 resolve、isBusy 卡死。
         toolApproval.denyAll()
+        return
+      }
+
+      if (assistantModePicker.isActive) {
+        assistantModePicker.close()
+        setStatusLine(i18n.t('status.assistantModeSelectionCancelled'))
         return
       }
 
@@ -713,6 +752,17 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         permissionPicker.moveSelection('next')
       } else if (key.return) {
         void applyPermissionSelection()
+      }
+      return
+    }
+
+    if (assistantModePicker.isActive) {
+      if (key.leftArrow || key.upArrow) {
+        assistantModePicker.moveSelection('previous')
+      } else if (key.rightArrow || key.downArrow) {
+        assistantModePicker.moveSelection('next')
+      } else if (key.return) {
+        void applyAssistantModeSelection()
       }
       return
     }
@@ -832,6 +882,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       setSelectedSuggestionIndex(0)
     }
   }, [
+    applyAssistantModeSelection,
     applySelectedSuggestion,
     applyPermissionSelection,
     commandSuggestions.length,
@@ -844,6 +895,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     isSuggestionOpen,
     navigateHistory,
     params,
+    assistantModePicker,
     permissionPicker,
     exitHistoryNavigation,
     toolApproval,
@@ -852,7 +904,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   ])
 
   const handlePaste = useCallback((text: string) => {
-    if (busyRef.current || toolApproval.isActive || userInteraction.isActive || !text) {
+    if (busyRef.current || toolApproval.isActive || userInteraction.isActive || assistantModePicker.isActive || !text) {
       return
     }
 
@@ -863,7 +915,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     setInputCursor(inputCursor + insertedCharacters.length)
     setHistoryIndex(null)
     setIsSuggestionDismissed(false)
-  }, [inputCursor, inputValue, toolApproval.isActive, userInteraction.isActive])
+  }, [assistantModePicker.isActive, inputCursor, inputValue, toolApproval.isActive, userInteraction.isActive])
 
   return {
     bootstrap,
@@ -875,8 +927,10 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     streamingMessages,
     isBooting,
     isBusy,
-    configInitPrompt: permissionPicker.isActive
-      ? permissionPicker.promptText
+    configInitPrompt: assistantModePicker.isActive
+      ? assistantModePicker.promptText
+      : permissionPicker.isActive
+        ? permissionPicker.promptText
       : configInit.isActive
         ? configInit.promptText +
           (configInit.errorText
@@ -897,16 +951,20 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       ? toolApproval.choiceItems
       : userInteraction.isActive
         ? userInteraction.choiceItems
-        : permissionPicker.isActive
-          ? permissionPicker.choiceItems
-          : configInit.choiceItems,
+        : assistantModePicker.isActive
+          ? assistantModePicker.choiceItems
+          : permissionPicker.isActive
+            ? permissionPicker.choiceItems
+            : configInit.choiceItems,
     selectedChoiceIndex: toolApproval.isActive
       ? toolApproval.selectedChoiceIndex
       : userInteraction.isActive
         ? userInteraction.selectedChoiceIndex
-        : permissionPicker.isActive
-          ? permissionPicker.selectedChoiceIndex
-          : configInit.selectedChoiceIndex,
+        : assistantModePicker.isActive
+          ? assistantModePicker.selectedChoiceIndex
+          : permissionPicker.isActive
+            ? permissionPicker.selectedChoiceIndex
+            : configInit.selectedChoiceIndex,
     recentSessions,
     handleInput,
     handlePaste,

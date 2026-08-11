@@ -20,6 +20,7 @@ export async function writeModelConfig(config: ModelConfig): Promise<void> {
     baseUrl: config.baseUrl,
     model: config.model,
     maxTokens: config.maxTokens,
+    contextWindowTokens: config.contextWindowTokens,
     temperature: config.temperature,
     timeoutMs: config.timeoutMs,
   }

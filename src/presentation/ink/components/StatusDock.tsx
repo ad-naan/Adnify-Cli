@@ -14,6 +14,7 @@ export interface StatusDockProps {
   modelLabel: string
   contextPercent: number
   approxTokens: number
+  contextWindowTokens: number
   i18n: AppI18n
 }
 
@@ -63,7 +64,7 @@ export const StatusDock = memo(function StatusDock(props: StatusDockProps) {
             <Text color={adnifyTheme.textDim} wrap="truncate-end">{props.modelLabel}</Text>
             <Text color={adnifyTheme.borderMuted}>│</Text>
             <Text color={contextColor}>
-              ctx {props.contextPercent}% · {formatTokenCount(props.approxTokens)}
+              ctx {props.contextPercent}% · {formatTokenCount(props.approxTokens)}/{formatTokenCount(props.contextWindowTokens)}
             </Text>
           </>
         ) : null}

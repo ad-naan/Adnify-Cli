@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AdnifyCliRuntime } from '../../application/dto/AdnifyCliRuntime'
 import { estimateTokens } from '../../domain/session/value-objects/CompactionResult'
+import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import { adnifyTheme } from './theme'
 import { ActivityPulse } from './components/ActivityPulse'
 import { ConversationViewport, conversationBodyRows } from './components/ConversationViewport'
@@ -156,7 +157,8 @@ export function App(props: AppProps) {
     ...messages,
     ...(controller.streamingText ? [{ content: controller.streamingText }] : []),
   ])
-  const contextPercent = Math.min(999, Math.round((approxTokens / Math.max(1, modelConfig!.maxTokens)) * 100))
+  const contextWindowTokens = resolveContextWindowTokens(modelConfig!)
+  const contextPercent = Math.min(999, Math.round((approxTokens / Math.max(1, contextWindowTokens)) * 100))
 
   return (
     <Box width="100%" height={rows} flexDirection="column" paddingX={1} overflow="hidden">
@@ -254,6 +256,7 @@ export function App(props: AppProps) {
             modelLabel={modelConfig!.model}
             contextPercent={contextPercent}
             approxTokens={approxTokens}
+            contextWindowTokens={contextWindowTokens}
             i18n={i18n}
           />
         </Box>

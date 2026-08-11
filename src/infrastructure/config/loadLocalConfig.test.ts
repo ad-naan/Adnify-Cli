@@ -35,6 +35,7 @@ describe('loadLocalConfig', () => {
               baseUrl: 'https://api.example.com/v1',
               model: 'gpt-x',
               maxTokens: 1234,
+              contextWindowTokens: 200000,
               temperature: 0.4,
               timeoutMs: 15000,
             },
@@ -58,6 +59,7 @@ describe('loadLocalConfig', () => {
 
       expect(modelConfig.apiKey).toBe('sk-file')
       expect(modelConfig.model).toBe('gpt-x')
+      expect(modelConfig.contextWindowTokens).toBe(200000)
       expect(providers.lab?.baseUrl).toBe('https://lab.example.com/v1')
       expect(providers.lab?.models).toEqual(['lab-1', 'lab-2'])
     } finally {
@@ -75,6 +77,7 @@ describe('loadLocalConfig', () => {
         JSON.stringify({
           model: {
             maxTokens: -10,
+            contextWindowTokens: 100,
             temperature: 9,
             timeoutMs: 1,
           },
@@ -85,6 +88,7 @@ describe('loadLocalConfig', () => {
       const modelConfig = await loadModelConfig({ configPath })
 
       expect(modelConfig.maxTokens).toBe(1)
+      expect(modelConfig.contextWindowTokens).toBe(4096)
       expect(modelConfig.temperature).toBe(2)
       expect(modelConfig.timeoutMs).toBe(1000)
     } finally {

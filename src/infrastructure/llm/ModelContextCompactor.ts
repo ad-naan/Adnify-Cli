@@ -12,12 +12,14 @@ const KEEP_RECENT_MESSAGES = 6
 /**
  * 触发压缩的阈值比例（占 maxTokens）。
  */
-const COMPACTION_THRESHOLD = 0.75
+const COMPACTION_THRESHOLD = 0.85
 
 /**
- * 压缩后目标的 token 占比（压缩到 maxTokens 的 40% 以内）。
+ * 摘要输出目标为待压缩内容的 25%，并受 4096 tokens 硬上限约束。
  */
-const COMPACTION_TARGET_RATIO = 0.4
+const COMPACTION_TARGET_RATIO = 0.25
+const MIN_COMPACTABLE_TOKENS = 1_024
+const MIN_SAVINGS_TOKENS = 512
 
 /**
  * 基于模型的上下文压缩器。
@@ -31,14 +33,21 @@ const COMPACTION_TARGET_RATIO = 0.4
 export class ModelContextCompactor implements ContextCompactionPort {
   constructor(
     private readonly gateway: ModelGatewayPort,
-    private readonly maxTokens: number,
+    private readonly contextWindowTokens: number,
     private readonly logger: LoggerPort,
     private readonly summarizeModel?: string,
+    private readonly maxOutputTokens = 4_096,
   ) {}
 
   needsCompaction(messages: ModelMessage[], maxTokens: number): boolean {
-    void maxTokens
-    return shouldCompact(messages, this.maxTokens, COMPACTION_THRESHOLD)
+    const contextWindowTokens = maxTokens || this.contextWindowTokens
+    const conversationMessages = messages.filter((message) => message.role !== 'system')
+    const compactable = conversationMessages.slice(0, Math.max(0, conversationMessages.length - KEEP_RECENT_MESSAGES))
+    if (estimateTokens(compactable) < MIN_COMPACTABLE_TOKENS) return false
+
+    const reservedOutputTokens = Math.max(8_192, Math.ceil(this.maxOutputTokens * 1.25))
+    const usableInputTokens = Math.max(4_096, contextWindowTokens - reservedOutputTokens)
+    return shouldCompact(messages, usableInputTokens, COMPACTION_THRESHOLD)
   }
 
   async compact(
@@ -69,7 +78,7 @@ export class ModelContextCompactor implements ContextCompactionPort {
     }
 
     // 生成摘要
-    const summary = await this.generateSummary(toCompact, abortSignal)
+    const summary = await this.generateSummary(toCompact, maxTokens || this.contextWindowTokens, abortSignal)
 
     // 组装新消息列表
     const summaryMessage: ModelMessage = {
@@ -84,6 +93,20 @@ export class ModelContextCompactor implements ContextCompactionPort {
 
     const newMessages = [...systemMessages, summaryMessage, ...toKeep]
     const tokensAfter = estimateTokens(newMessages)
+
+    if (!summary || tokensAfter >= tokensBefore - MIN_SAVINGS_TOKENS) {
+      this.logger.warn('Skipped context compaction without meaningful savings', {
+        tokensBefore,
+        tokensAfter,
+        compactedCount: toCompact.length,
+      })
+      return {
+        messages,
+        compactedCount: 0,
+        tokensBefore,
+        tokensAfter: tokensBefore,
+      }
+    }
 
     this.logger.info('Context compacted', {
       messagesBefore: messages.length,
@@ -106,6 +129,7 @@ export class ModelContextCompactor implements ContextCompactionPort {
    */
   private async generateSummary(
     messages: ModelMessage[],
+    contextWindowTokens: number,
     abortSignal?: AbortSignal,
   ): Promise<string> {
     const conversationText = messages
@@ -138,7 +162,14 @@ export class ModelContextCompactor implements ContextCompactionPort {
       messages: summaryRequest,
       model: this.summarizeModel ?? 'gpt-4o-mini',
       temperature: 0,
-      maxTokens: Math.floor(this.maxTokens * COMPACTION_TARGET_RATIO),
+      maxTokens: Math.max(
+        512,
+        Math.min(
+          4_096,
+          Math.floor(estimateTokens(messages) * COMPACTION_TARGET_RATIO),
+          Math.floor(contextWindowTokens * 0.05),
+        ),
+      ),
       abortSignal,
     })) {
       summary += chunk.delta

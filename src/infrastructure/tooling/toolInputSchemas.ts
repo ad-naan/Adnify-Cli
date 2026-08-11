@@ -246,17 +246,27 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
     properties: {
       action: {
         type: 'string',
-        enum: ['inspect', 'set-assistant-mode', 'set-permission-mode', 'set-language', 'set-animation', 'switch-model'],
+        enum: ['inspect', 'begin-execution', 'set-assistant-mode', 'set-permission-mode', 'set-language', 'set-animation', 'switch-model'],
       },
       value: {
         type: 'string',
-        description: 'Mode, locale, or animation value for the selected action.',
+        description: 'Mode, locale, animation value, or optional target permission for begin-execution.',
       },
       provider: { type: 'string', description: 'Configured provider name for switch-model.' },
       model: { type: 'string', description: 'Optional model name for switch-model.' },
       rationale: { type: 'string', description: 'Short user-facing reason for the change.' },
     },
     required: ['action', 'rationale'],
+    additionalProperties: false,
+  },
+  'plan-document': {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['write', 'read', 'list'] },
+      name: { type: 'string', description: 'Stable document name; defaults to the current session id.' },
+      content: { type: 'string', description: 'Markdown content required for write.' },
+    },
+    required: ['action'],
     additionalProperties: false,
   },
 }

@@ -39,6 +39,7 @@ import type { RuntimeControlPort } from '../../application/ports/RuntimeControlP
 import { isAssistantMode } from '../../domain/assistant/value-objects/AssistantMode'
 import type { AnimationLevel, PermissionMode as RuntimePermissionMode } from '../../application/dto/UiPreferences'
 import { SUPPORTED_APP_LOCALES, type AppLocale } from '../../application/i18n/AppI18n'
+import { handlePlanDocument } from './handlers/planDocumentHandler'
 
 /**
  * 工具调度入口。
@@ -157,6 +158,8 @@ export class LocalToolExecutor implements ToolExecutorPort {
         }
       case 'runtime-control':
         return this.executeRuntimeControl(request, deadline)
+      case 'plan-document':
+        return handlePlanDocument(request)
       default:
         return toolFailure(request.toolId, `Tool "${request.toolId}" is not implemented yet.`)
     }
@@ -316,6 +319,46 @@ export class LocalToolExecutor implements ToolExecutorPort {
           `permissionMode=${this.runtimeControl.getPermissionMode()}`,
           this.runtimeControl.inspect(),
         ].join('\n'),
+      }
+    }
+
+    if (action === 'begin-execution') {
+      if (!request.session) {
+        return toolFailure(request.toolId, 'begin-execution requires an active session.')
+      }
+      const currentPermission = this.runtimeControl.getPermissionMode()
+      const targetPermission = value || (currentPermission === 'plan' ? 'workspace' : currentPermission)
+      if (!isPermissionMode(targetPermission)) {
+        return toolFailure(request.toolId, 'begin-execution value must be manual, workspace, or auto when provided.')
+      }
+      if (targetPermission === 'plan') {
+        return toolFailure(request.toolId, 'begin-execution cannot keep the permission mode in plan.')
+      }
+
+      const needsChange = request.session.mode === 'plan' || currentPermission === 'plan'
+      if (!needsChange) {
+        return { toolId: request.toolId, ok: true, content: 'Execution is already enabled.' }
+      }
+
+      const denial = await this.ensureApproved({
+        toolId: request.toolId,
+        riskLevel: 'dangerous',
+        summary: `leave explicit plan restrictions and begin implementation with ${targetPermission} permissions`,
+        scope: 'protected',
+        kind: 'other',
+        mutates: false,
+        preview: rationale || 'The assistant will be able to edit workspace files and run checks under the selected permission policy.',
+      }, deadline)
+      if (denial) return denial
+
+      request.session.switchMode('agent', new Date())
+      if (currentPermission !== targetPermission) {
+        await this.runtimeControl.setPermissionMode(targetPermission)
+      }
+      return {
+        toolId: request.toolId,
+        ok: true,
+        content: `Execution enabled: assistantMode=agent, permissionMode=${targetPermission}. Continue the requested implementation now.`,
       }
     }
 

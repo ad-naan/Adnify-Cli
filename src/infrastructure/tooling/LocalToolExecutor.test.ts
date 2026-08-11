@@ -140,6 +140,37 @@ describe('LocalToolExecutor', () => {
     expect(approval.asked).toHaveLength(1)
   })
 
+  test('uses one approval to leave plan restrictions and begin execution', async () => {
+    const approval = createRuntimeApprovalSpy('approved')
+    let permission: 'manual' | 'workspace' | 'auto' | 'plan' = 'plan'
+    const runtimeControl: RuntimeControlPort = {
+      inspect: () => '{}',
+      getPermissionMode: () => permission,
+      setPermissionMode: async (mode) => { permission = mode },
+      setAnimationLevel: async () => {},
+      setLocale: async () => {},
+      switchModel: () => null,
+    }
+    const executor = new LocalToolExecutor(
+      approval.port, undefined, undefined, undefined, () => permission, undefined, runtimeControl,
+    )
+    const session = ConversationSession.create({
+      id: 'begin-execution', title: 'test', mode: 'plan', workspacePath: process.cwd(), createdAt: new Date(),
+    })
+
+    const result = await executor.execute({
+      toolId: 'runtime-control',
+      input: '{"action":"begin-execution","rationale":"create the requested file"}',
+      workspace: createWorkspace(),
+      session,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(session.mode).toBe('agent')
+    expect(permission).toBe('workspace')
+    expect(approval.asked).toHaveLength(1)
+  })
+
   test('should reject unsupported shell commands', async () => {
     const executor = new LocalToolExecutor()
 

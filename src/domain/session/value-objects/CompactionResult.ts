@@ -15,11 +15,15 @@ export interface CompactionResult {
 }
 
 /**
- * token 估算 — 粗略使用 chars / 4。
- * 与 :context 命令保持一致。
+ * token 估算：拉丁文本约 chars / 4，CJK 字符约 1 token，并计入消息结构开销。
+ * 这仍是 provider-independent 的近似值，但不会再严重低估中文会话。
  */
 export function estimateTokens(messages: ReadonlyArray<{ content: string }>): number {
-  return Math.ceil(messages.reduce((sum, m) => sum + m.content.length, 0) / 4)
+  return messages.reduce((sum, message) => {
+    const cjkCount = message.content.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g)?.length ?? 0
+    const otherCharacters = Math.max(0, message.content.length - cjkCount)
+    return sum + cjkCount + Math.ceil(otherCharacters / 4) + 4
+  }, 0)
 }
 
 /**
