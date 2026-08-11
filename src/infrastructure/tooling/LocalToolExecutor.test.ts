@@ -377,6 +377,23 @@ describe('LocalToolExecutor approval gate', () => {
     })
   })
 
+  test('should discard the snapshot when an approved mutation fails validation', async () => {
+    await withTempWorkspace(async (workspace) => {
+      const approval = createApprovalSpy('approved')
+      const checkpoints = new CheckpointManager(workspace.rootPath, silentLogger as never)
+      const executor = new LocalToolExecutor(approval.port, undefined, checkpoints)
+
+      const result = await executor.execute({
+        toolId: 'file-ops',
+        input: '{"action":"update","path":"missing.txt","oldText":"before","newText":"after","allowWrite":true}',
+        workspace,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(checkpoints.listSnapshots()).toHaveLength(0)
+    })
+  })
+
   test('should not snapshot when the write is denied', async () => {
     await withTempWorkspace(async (workspace) => {
       const approval = createApprovalSpy('denied')

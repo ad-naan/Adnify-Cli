@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { renderToString } from 'ink'
+import { terminalTextWidth } from '../terminalText'
 import { MascotGlyph } from './MascotGlyph'
 
 describe('otter brand UI', () => {
@@ -15,7 +16,7 @@ describe('otter brand UI', () => {
     const lines = output.split('\n')
 
     expect(lines).toHaveLength(5)
-    expect(lines.every((line) => line.length <= 24)).toBe(true)
+    expect(lines.every((line) => terminalTextWidth(line) <= 24)).toBe(true)
     expect(output).toContain('ᴥ')
     expect(output).toContain('≈≈')
   })

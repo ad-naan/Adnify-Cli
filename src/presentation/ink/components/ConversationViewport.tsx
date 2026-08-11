@@ -392,7 +392,7 @@ function buildHiddenAboveLabel(
       above: hiddenAbove,
       below: hiddenBelow,
     })
-    if (scrolled.length <= contentWidth) {
+    if (terminalTextWidth(scrolled) <= contentWidth) {
       return scrolled
     }
 
@@ -400,7 +400,7 @@ function buildHiddenAboveLabel(
       above: hiddenAbove,
       below: hiddenBelow,
     })
-    return shortScrolled.length <= contentWidth ? shortScrolled : '…'
+    return terminalTextWidth(shortScrolled) <= contentWidth ? shortScrolled : '…'
   }
 
   if (hiddenAbove <= 0) {
@@ -410,12 +410,12 @@ function buildHiddenAboveLabel(
   const full = hiddenAbove === 1
     ? i18n.t('conversation.scrollHiddenOne')
     : i18n.t('conversation.scrollHidden', { count: hiddenAbove })
-  if (full.length <= contentWidth) {
+  if (terminalTextWidth(full) <= contentWidth) {
     return full
   }
 
   const short = i18n.t('conversation.scrollHiddenShort', { count: hiddenAbove })
-  return short.length <= contentWidth ? short : '…'
+  return terminalTextWidth(short) <= contentWidth ? short : '…'
 }
 
 export const ConversationViewport = memo(function ConversationViewport(

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { renderToString } from 'ink'
 import { createAppI18n } from '../../../application/i18n/AppI18n'
+import { terminalTextWidth } from '../terminalText'
 import { EmptyState } from './EmptyState'
 import { HeaderBar } from './HeaderBar'
 
@@ -52,6 +53,6 @@ describe('framed CLI layout', () => {
     const nonEmptyLines = output.split('\n').filter((line) => line.trim())
     expect(output).toContain('快速开始')
     expect(output).toContain(':sessions')
-    expect(nonEmptyLines.every((line) => line.length <= 120)).toBe(true)
+    expect(nonEmptyLines.every((line) => terminalTextWidth(line) <= 120)).toBe(true)
   })
 })

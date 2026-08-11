@@ -154,17 +154,26 @@ export class LocalToolExecutor implements ToolExecutorPort {
       return denial
     }
 
-    // Snapshot the pre-write state so a single tool call can be rolled back later.
-    // Taken after approval (no snapshot for a denied write) and before the write lands.
+    // Snapshot the pre-write state so a successful tool call can be rolled back later.
+    // Failed validation or writes must not leave a restore point for an operation that never landed.
+    let snapshotId: string | undefined
     if (this.checkpoints && MUTATING_FILE_OPS.has(action)) {
       try {
-        this.checkpoints.captureBeforeWrite(targetPath, `file-ops ${action} ${targetPath}`)
+        snapshotId = this.checkpoints.captureBeforeWrite(
+          targetPath,
+          `file-ops ${action} ${targetPath}`,
+        )
       } catch {
-        // A failed snapshot must not block the write the user already approved.
+        // Checkpoints are a recovery aid, not an availability boundary for an approved write.
       }
     }
 
-    return runFileOps(parsed.value)
+    const result = await runFileOps(parsed.value)
+    if (!result.ok && snapshotId) {
+      this.checkpoints?.deleteSnapshot(snapshotId)
+    }
+
+    return result
   }
 
   private async executeShellRunner(

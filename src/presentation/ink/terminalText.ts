@@ -1,8 +1,28 @@
+const ANSI_ESCAPE_PATTERN = /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g
+
+/** Removes terminal control sequences before measuring rendered content. */
+export function stripTerminalAnsi(content: string): string {
+  return content.replace(ANSI_ESCAPE_PATTERN, '')
+}
+
 export function terminalCharacterWidth(character: string): number {
   if (character === '\t') return 2
 
   const codePoint = character.codePointAt(0)
-  if (!codePoint) return 1
+  if (codePoint === undefined) return 0
+  if (
+    codePoint < 0x20 ||
+    (codePoint >= 0x7f && codePoint < 0xa0) ||
+    codePoint === 0x200d ||
+    (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
+    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
+    (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
+    (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
+    (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
+    (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
+  ) {
+    return 0
+  }
 
   if (
     codePoint >= 0x1100 &&
@@ -27,7 +47,7 @@ export function terminalCharacterWidth(character: string): number {
 }
 
 export function terminalTextWidth(content: string): number {
-  return Array.from(content).reduce(
+  return Array.from(stripTerminalAnsi(content)).reduce(
     (width, character) => width + terminalCharacterWidth(character),
     0,
   )

@@ -1,9 +1,16 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveInputWindow, terminalTextWidth } from './terminalText'
+import { resolveInputWindow, stripTerminalAnsi, terminalTextWidth } from './terminalText'
 
 describe('terminal text geometry', () => {
   test('counts CJK characters as two terminal columns', () => {
     expect(terminalTextWidth('a你b')).toBe(4)
+  })
+
+  test('ignores ANSI styling and zero-width combining marks', () => {
+    const styled = '\u001b[36ma你\u001b[0m'
+    expect(stripTerminalAnsi(styled)).toBe('a你')
+    expect(terminalTextWidth(styled)).toBe(3)
+    expect(terminalTextWidth('e\u0301')).toBe(1)
   })
 
   test('places the cursor at the logical editing position', () => {

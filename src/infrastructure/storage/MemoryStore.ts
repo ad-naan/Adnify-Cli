@@ -22,7 +22,7 @@ export class MemoryStore {
   private cache: Map<string, MemoryEntry[]> | null = null
 
   constructor(
-    private readonly storage: AppStorageSnapshot,
+    storage: AppStorageSnapshot,
     private readonly workspacePath: string,
   ) {
     this.memoryDir = join(storage.dataRoot, 'memories')
@@ -60,14 +60,19 @@ export class MemoryStore {
   }
 
   async list(): Promise<MemoryEntry[]> {
-    return this.ensureCache()
+    return [...(await this.ensureCache())]
   }
 
   async add(content: string): Promise<MemoryEntry> {
-    const entries = await this.ensureCache()
+    const normalizedContent = content.trim()
+    if (!normalizedContent) {
+      throw new Error('Memory content cannot be empty')
+    }
+
+    const entries = [...(await this.ensureCache())]
     const entry: MemoryEntry = {
       id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      content: content.trim(),
+      content: normalizedContent,
       createdAt: new Date().toISOString(),
       scope: 'workspace',
     }
@@ -79,7 +84,7 @@ export class MemoryStore {
   }
 
   async remove(id: string): Promise<boolean> {
-    const entries = await this.ensureCache()
+    const entries = [...(await this.ensureCache())]
     const index = entries.findIndex((e) => e.id === id)
     if (index === -1) {
       return false
@@ -92,6 +97,7 @@ export class MemoryStore {
   }
 
   async clear(): Promise<void> {
+    await this.ensureCache()
     this.cache!.set(this.workspaceKey(), [])
     await this.persist()
   }
