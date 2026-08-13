@@ -39,8 +39,7 @@ describe('ConversationViewport detail levels', () => {
       { columns: 80 },
     )
 
-    expect(output).toContain('✓ shell-runner 20ms · Ctrl+E expand')
-    expect(output).toContain('more · Ctrl+E expand')
+    expect(output).toContain('▸ shell-runner 20ms · 4 lines')
     expect(output).not.toContain('completed')
     expect(output).not.toContain('elapsed:')
     expect(output).not.toContain('line-4')
@@ -58,7 +57,7 @@ describe('ConversationViewport detail levels', () => {
     )
 
     expect(output).toContain('line-4')
-    expect(output).toContain('Ctrl+E collapse')
+    expect(output).toContain('▾ shell-runner 20ms · 4 lines')
     expect(output).not.toContain('more lines hidden')
   })
 
@@ -82,7 +81,7 @@ describe('ConversationViewport detail levels', () => {
       { columns: 80 },
     )
 
-    expect(compact).toContain('› workspace-read')
+    expect(compact).toContain('▸ workspace-read')
     expect(compact).not.toContain('"depth"')
     expect(expanded).toContain('input: {"depth":2}')
   })
@@ -109,9 +108,58 @@ describe('ConversationViewport detail levels', () => {
       { columns: 90 },
     )
 
-    expect(output).toContain('› ✓ shell-runner 20ms · Ctrl+E collapse')
+    expect(output).toContain('▾ shell-runner 20ms · 4 lines')
     expect(output).toContain('line-4')
-    expect(output).toContain('✓ workspace-read 3ms · Ctrl+E expand')
+    expect(output).toContain('▸ workspace-read 3ms · 4 lines')
     expect(output).not.toContain('other-4')
+  })
+
+  test('renders assistant messages without repeated brand labels or tree rails', () => {
+    const assistant = new ConversationMessage({
+      id: 'assistant',
+      role: 'assistant',
+      createdAt: new Date('2026-08-10T00:00:00.000Z'),
+      content: 'First line\nSecond line',
+    })
+    const output = renderToString(
+      <ConversationViewport messages={[assistant]} viewportRows={6} i18n={i18n} />,
+      { columns: 80 },
+    )
+
+    expect(output).toContain('First line')
+    expect(output).toContain('Second line')
+    expect(output).not.toContain('otter')
+    expect(output).not.toContain('│ First line')
+  })
+
+  test('merges a completed tool request and result into one visual row', () => {
+    const call = new ConversationMessage({
+      id: 'call', role: 'system', createdAt: new Date(),
+      content: createCliNoticeContent('tool: shell-runner\ninput: {}', { title: 'tools · shell-runner', tone: 'info' }),
+    })
+    const output = renderToString(
+      <ConversationViewport messages={[call, toolMessage]} viewportRows={8} i18n={i18n} />,
+      { columns: 80 },
+    )
+
+    expect(output.match(/shell-runner/g)).toHaveLength(1)
+    expect(output).not.toContain('○')
+  })
+
+  test('renders basic markdown without leaking source markers', () => {
+    const assistant = new ConversationMessage({
+      id: 'markdown', role: 'assistant', createdAt: new Date(),
+      content: '## Project\n\nThis is **important**.\n\n> **Your terminal.**',
+    })
+    const output = renderToString(
+      <ConversationViewport messages={[assistant]} viewportRows={10} i18n={i18n} />,
+      { columns: 80 },
+    )
+
+    expect(output).toContain('Project')
+    expect(output).toContain('This is important.')
+    expect(output).toContain('│ Your terminal.')
+    expect(output).not.toContain('##')
+    expect(output).not.toContain('**')
   })
 })

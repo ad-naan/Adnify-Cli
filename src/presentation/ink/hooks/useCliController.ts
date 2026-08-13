@@ -74,7 +74,6 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':workspace': 'command.desc.workspace',
   ':status': 'command.desc.status',
   ':tools': 'command.desc.tools',
-  ':tool-focus': 'command.desc.toolFocus',
   ':doctor': 'command.desc.doctor',
   ':diff': 'command.desc.diff',
   ':review': 'command.desc.review',

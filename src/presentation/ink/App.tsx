@@ -82,33 +82,48 @@ export function App(props: AppProps) {
     conversationBodyRows(conversationViewportRows),
   )
 
+  const toggleTool = useCallback((targetId: string) => {
+    setSelectedToolMessageId(targetId)
+    setExpandedToolMessageIds((current) =>
+      current.includes(targetId)
+        ? current.filter((id) => id !== targetId)
+        : [...current, targetId],
+    )
+  }, [])
+
   const handleInput = useCallback(
     (input: string, key: Parameters<typeof controller.handleInput>[1]) => {
       const toggleSelectedTool = () => {
         const targetId = selectedToolMessageId ?? toolMessageIds[toolMessageIds.length - 1]
         if (!targetId) return
-        setSelectedToolMessageId(targetId)
-        setExpandedToolMessageIds((current) =>
-          current.includes(targetId)
-            ? current.filter((id) => id !== targetId)
-            : [...current, targetId],
-        )
+        toggleTool(targetId)
+      }
+      const moveToolFocus = (direction: -1 | 1) => {
+        if (toolMessageIds.length === 0) return
+        const currentIndex = selectedToolMessageId
+          ? toolMessageIds.indexOf(selectedToolMessageId)
+          : direction < 0 ? toolMessageIds.length : -1
+        const nextIndex = Math.max(0, Math.min(toolMessageIds.length - 1, currentIndex + direction))
+        setSelectedToolMessageId(toolMessageIds[nextIndex])
+        setIsToolBrowseMode(true)
       }
 
       if (isToolBrowseMode) {
-        if (key.escape || input.toLowerCase() === 'q') {
+        if (key.escape || key.tab || input.toLowerCase() === 'q') {
           setIsToolBrowseMode(false)
           setSelectedToolMessageId(undefined)
           return
         }
         if (key.upArrow || key.downArrow) {
-          const currentIndex = selectedToolMessageId
-            ? toolMessageIds.indexOf(selectedToolMessageId)
-            : toolMessageIds.length - 1
-          const nextIndex = key.upArrow
-            ? Math.max(0, currentIndex - 1)
-            : Math.min(toolMessageIds.length - 1, Math.max(0, currentIndex + 1))
-          setSelectedToolMessageId(toolMessageIds[nextIndex])
+          moveToolFocus(key.upArrow ? -1 : 1)
+          return
+        }
+        if (key.pageUp || key.pageDown) {
+          setIsToolBrowseMode(false)
+          setSelectedToolMessageId(undefined)
+          const pageRows = Math.max(1, conversationViewportRows - 1)
+          if (key.pageUp) scroll.scrollUp(pageRows)
+          else scroll.scrollDown(pageRows)
           return
         }
         if (key.return || input === ' ') {
@@ -118,38 +133,24 @@ export function App(props: AppProps) {
         return
       }
 
-      if (key.return && controller.inputValue.trim().toLowerCase() === ':tool-focus') {
-        controller.clearInput()
-        if (toolMessageIds.length > 0) {
-          setIsToolBrowseMode(true)
-          setSelectedToolMessageId(toolMessageIds[toolMessageIds.length - 1])
-        }
+      if (
+        key.tab &&
+        !isTranscriptView &&
+        !controller.inputValue &&
+        !controller.isSuggestionOpen &&
+        !controller.toolApprovalPrompt &&
+        !controller.userInteractionPrompt &&
+        !controller.configInitPrompt &&
+        toolMessageIds.length > 0
+      ) {
+        setSelectedToolMessageId(toolMessageIds[toolMessageIds.length - 1])
+        setIsToolBrowseMode(true)
         return
       }
 
       if (key.ctrl && input === 'o' && !controller.toolApprovalPrompt && !controller.configInitPrompt) {
         setIsTranscriptView((current) => !current)
         setSelectedToolMessageId(undefined)
-        return
-      }
-
-      if (
-        key.ctrl &&
-        (key.upArrow || key.downArrow) &&
-        !isTranscriptView &&
-        !controller.toolApprovalPrompt &&
-        !controller.userInteractionPrompt &&
-        !controller.configInitPrompt &&
-        toolMessageIds.length > 0
-      ) {
-        const currentIndex = selectedToolMessageId
-          ? toolMessageIds.indexOf(selectedToolMessageId)
-          : toolMessageIds.length
-        const nextIndex = key.upArrow
-          ? Math.max(0, currentIndex - 1)
-          : Math.min(toolMessageIds.length - 1, currentIndex < 0 ? toolMessageIds.length - 1 : currentIndex + 1)
-        setSelectedToolMessageId(toolMessageIds[nextIndex])
-        setIsToolBrowseMode(true)
         return
       }
 
@@ -203,6 +204,7 @@ export function App(props: AppProps) {
       controller.handleInput,
       controller.inputValue,
       controller.isBusy,
+      controller.isSuggestionOpen,
       controller.toolApprovalPrompt,
       controller.userInteractionPrompt,
       conversationViewportRows,
@@ -210,6 +212,7 @@ export function App(props: AppProps) {
       isToolBrowseMode,
       selectedToolMessageId,
       scroll,
+      toggleTool,
       toolMessageIds,
     ],
   )

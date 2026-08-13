@@ -5,7 +5,6 @@ import {
   parseCliTranscriptMarkup,
   type CliTranscriptTone,
 } from '../../../application/support/CliTranscriptMarkup'
-import { collapseBlock } from '../../../application/support/CollapsedBlock'
 import type { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import { adnifyTheme } from '../theme'
 import { terminalCharacterWidth, terminalTextWidth } from '../terminalText'
@@ -60,12 +59,12 @@ interface StreamingHeaderViewportRow {
 interface ToolHeaderViewportRow {
   kind: 'tool-header'
   key: string
-  glyph: string
   label: string
   meta?: string
   color: string
   messageId: string
   selected: boolean
+  expanded: boolean
 }
 
 type ViewportRow = TextViewportRow | SpacerViewportRow | StreamingHeaderViewportRow | ToolHeaderViewportRow
@@ -88,14 +87,6 @@ function resolveToneColor(tone: CliTranscriptTone): string {
   }
 }
 
-function toolGlyph(tone: CliTranscriptTone, isResult: boolean): string {
-  if (!isResult) return '›'
-  if (tone === 'success') return '✓'
-  if (tone === 'danger') return '✗'
-  if (tone === 'warning') return '!'
-  return '•'
-}
-
 function extractToolName(title: string | undefined, i18n: AppI18n): string | null {
   const prefix = `${i18n.t('transcript.tools')} ·`
   if (!title?.startsWith(prefix)) return null
@@ -106,16 +97,15 @@ export function collectToolMessageIds(
   messages: readonly ConversationMessage[],
   i18n: AppI18n,
 ): string[] {
-  return messages
-    .filter((message) => {
+  return messages.flatMap((message, index) => {
+      if (isSupersededToolRequest(message, messages[index + 1], i18n)) return []
       const structured = parseCliTranscriptMarkup(message.content)
       return Boolean(
         structured &&
         (structured.kind === 'notice' || structured.kind === 'command-output') &&
         extractToolName(structured.title, i18n),
-      )
+      ) ? [message.id] : []
     })
-    .map((message) => message.id)
 }
 
 function compactToolResult(
@@ -135,20 +125,6 @@ function compactToolResult(
 function extractToolTurn(content: string): string | undefined {
   const matched = /(?:\u7b2c\s*)?(\d+)\s*\/\s*(\d+)(?:\s*\u8f6e|\s*turn)?/i.exec(content)
   return matched ? `${matched[1]}/${matched[2]}` : undefined
-}
-
-function toolCollapsedContent(
-  content: string,
-  i18n: AppI18n,
-  contentWidth: number,
-): string {
-  const collapsed = collapseBlock(content, 3, i18n, contentWidth)
-  if (!collapsed.isCollapsed) return collapsed.lines.join('\n')
-  const hint = i18n.t(
-    collapsed.hiddenLines === 1 ? 'collapse.toolHiddenOne' : 'collapse.toolHidden',
-    { count: collapsed.hiddenLines },
-  )
-  return [...collapsed.lines.slice(0, -1), hint].join('\n')
 }
 
 function wrapContent(content: string, maxWidth: number): string[] {
@@ -199,6 +175,7 @@ function appendWrappedRows(
     prefixColor?: string
     linePrefix?: string
     linePrefixColor?: string
+    bold?: boolean
   },
 ) {
   const baseIndent = options.indent ?? 0
@@ -223,6 +200,7 @@ function appendWrappedRows(
         : baseIndent + (prefixPadding - linePrefixPadding),
       prefix: index === 0 ? options.prefix : options.linePrefix,
       prefixColor: index === 0 ? options.prefixColor : options.linePrefixColor,
+      bold: options.bold,
     })
   })
 }
@@ -252,37 +230,39 @@ function appendMessageRows(
       case 'command-output': {
         const accentColor = resolveToneColor(structured.tone)
         const toolName = extractToolName(structured.title, i18n)
-        const isToolOutput = Boolean(toolName)
         if (toolName) {
           const result = compactToolResult(structured.content)
           const body = result.body || result.fallbackStatus || ''
+          const detailLines = body ? body.split('\n').length : 0
           rows.push({
             kind: 'tool-header',
             key: `${message.id}-tool-output-header`,
-            glyph: toolGlyph(structured.tone, true),
             label: toolName,
             meta: [
               result.elapsed,
-              i18n.t(toolExpanded ? 'conversation.toolCollapseHint' : 'conversation.toolExpandHint'),
+              detailLines > 0 ? i18n.t('conversation.toolLineCount', { count: detailLines }) : undefined,
             ].filter(Boolean).join(' · '),
             color: accentColor,
             messageId: message.id,
             selected: selectedToolMessageId === message.id,
+            expanded: toolExpanded,
           })
-          if (body) {
+          if (body && toolExpanded) {
             appendWrappedRows(rows, {
               keyPrefix: `${message.id}-tool-output-body`,
-              content: toolExpanded ? body : toolCollapsedContent(body, i18n, contentWidth),
+              content: body,
               contentColor: structured.tone === 'danger' ? adnifyTheme.textSecondary : adnifyTheme.textMuted,
               contentWidth,
               indent: 2,
+              prefix: '│',
+              prefixColor: adnifyTheme.borderMuted,
+              linePrefix: '│',
+              linePrefixColor: adnifyTheme.borderMuted,
             })
           }
           return
         }
-        const content = isToolOutput && !toolExpanded
-          ? collapseBlock(structured.content, 4, i18n, contentWidth).lines.join('\n')
-          : structured.content
+        const content = structured.content
 
         appendWrappedRows(rows, {
           keyPrefix: `${message.id}-command-output-title`,
@@ -308,20 +288,18 @@ function appendMessageRows(
       case 'notice': {
         const accentColor = resolveToneColor(structured.tone)
         const toolName = extractToolName(structured.title, i18n)
-        const isToolNotice = Boolean(toolName)
         if (toolName) {
           rows.push({
             kind: 'tool-header',
             key: `${message.id}-tool-notice-header`,
-            glyph: toolGlyph(structured.tone, false),
             label: toolName,
             meta: [
               extractToolTurn(structured.content),
-              i18n.t(toolExpanded ? 'conversation.toolCollapseHint' : 'conversation.toolExpandHint'),
             ].filter(Boolean).join(' · '),
             color: accentColor,
             messageId: message.id,
             selected: selectedToolMessageId === message.id,
+            expanded: toolExpanded,
           })
           if (toolExpanded) {
             appendWrappedRows(rows, {
@@ -330,26 +308,28 @@ function appendMessageRows(
               contentColor: adnifyTheme.textMuted,
               contentWidth,
               indent: 2,
+              prefix: '│',
+              prefixColor: adnifyTheme.borderMuted,
+              linePrefix: '│',
+              linePrefixColor: adnifyTheme.borderMuted,
             })
           }
           return
         }
-        const content = isToolNotice && !toolExpanded
-          ? collapseBlock(structured.content, 3, i18n, contentWidth).lines.join('\n')
-          : structured.content
+        const content = structured.content
 
         appendWrappedRows(rows, {
           keyPrefix: `${message.id}-notice-title`,
           prefix: '~',
           prefixColor: accentColor,
           content: structured.title ?? i18n.t('conversation.notice'),
-          contentColor: accentColor,
+          contentColor: adnifyTheme.textSecondary,
           contentWidth,
         })
         appendWrappedRows(rows, {
           keyPrefix: `${message.id}-notice-body`,
           prefix: '│',
-          prefixColor: accentColor,
+          prefixColor: adnifyTheme.borderMuted,
           linePrefix: '│',
           linePrefixColor: accentColor,
           content,
@@ -364,25 +344,7 @@ function appendMessageRows(
 
   switch (message.role) {
     case 'assistant':
-      rows.push({
-        kind: 'text',
-        key: `${message.id}-assistant-header`,
-        prefix: '◉ otter',
-        prefixColor: adnifyTheme.brand,
-        content: i18n.t('conversation.response'),
-        contentColor: adnifyTheme.textDim,
-      })
-      appendWrappedRows(rows, {
-        keyPrefix: `${message.id}-assistant-body`,
-        prefix: '│',
-        prefixColor: adnifyTheme.borderActive,
-        linePrefix: '│',
-        linePrefixColor: adnifyTheme.borderActive,
-        content: message.content,
-        contentColor: adnifyTheme.textPrimary,
-        contentWidth,
-        indent: 1,
-      })
+      appendAssistantMarkdownRows(rows, message.id, message.content, contentWidth)
       return
     case 'user':
       appendWrappedRows(rows, {
@@ -397,25 +359,82 @@ function appendMessageRows(
     case 'system':
     default:
       appendWrappedRows(rows, {
-        keyPrefix: `${message.id}-system-title`,
-        prefix: '*',
+        keyPrefix: `${message.id}-system-body`,
+        prefix: '·',
         prefixColor: adnifyTheme.textDim,
-        content: i18n.t('conversation.notice'),
-        contentColor: adnifyTheme.textSecondary,
+        content: message.content,
+        contentColor: adnifyTheme.textMuted,
         contentWidth,
       })
+  }
+}
+
+function stripInlineMarkdown(content: string): string {
+  return content
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+}
+
+function appendAssistantMarkdownRows(
+  rows: ViewportRow[],
+  messageId: string,
+  content: string,
+  contentWidth: number,
+): void {
+  content.replace(/\r\n/g, '\n').split('\n').forEach((rawLine, index) => {
+    const heading = /^(#{1,3})\s+(.+)$/.exec(rawLine)
+    const quote = /^>\s?(.*)$/.exec(rawLine)
+    const bullet = /^\s*[-*]\s+(.+)$/.exec(rawLine)
+    const numbered = /^\s*(\d+\.)\s+(.+)$/.exec(rawLine)
+    const fullBold = /^\*\*(.+)\*\*$/.exec(rawLine.trim())
+    const keyPrefix = `${messageId}-assistant-${index}`
+
+    if (heading) {
       appendWrappedRows(rows, {
-        keyPrefix: `${message.id}-system-body`,
+        keyPrefix,
+        content: stripInlineMarkdown(heading[2] ?? ''),
+        contentColor: adnifyTheme.textSecondary,
+        contentWidth,
+        bold: true,
+      })
+      return
+    }
+    if (quote) {
+      appendWrappedRows(rows, {
+        keyPrefix,
         prefix: '│',
         prefixColor: adnifyTheme.borderMuted,
         linePrefix: '│',
         linePrefixColor: adnifyTheme.borderMuted,
-        content: message.content,
+        content: stripInlineMarkdown(quote[1] ?? ''),
         contentColor: adnifyTheme.textMuted,
         contentWidth,
-        indent: 2,
+        indent: 1,
       })
-  }
+      return
+    }
+    if (bullet || numbered) {
+      appendWrappedRows(rows, {
+        keyPrefix,
+        prefix: bullet ? '•' : numbered?.[1],
+        prefixColor: adnifyTheme.textDim,
+        content: stripInlineMarkdown((bullet?.[1] ?? numbered?.[2]) || ''),
+        contentColor: adnifyTheme.textPrimary,
+        contentWidth,
+        indent: 1,
+      })
+      return
+    }
+    appendWrappedRows(rows, {
+      keyPrefix,
+      content: stripInlineMarkdown(fullBold?.[1] ?? rawLine),
+      contentColor: adnifyTheme.textPrimary,
+      contentWidth,
+      bold: Boolean(fullBold),
+    })
+  })
 }
 
 function buildMessageRows(
@@ -430,6 +449,8 @@ function buildMessageRows(
   const rows: ViewportRow[] = []
 
   messages.forEach((message, index) => {
+    const nextMessage = messages[index + 1]
+    if (isSupersededToolRequest(message, nextMessage, i18n)) return
     appendMessageRows(
       rows,
       message,
@@ -439,12 +460,36 @@ function buildMessageRows(
       selectedToolMessageId,
     )
 
-    if (index < messages.length - 1 || hasStreaming) {
+    const currentIsTool = isToolTranscriptMessage(message, i18n)
+    const nextIsTool = nextMessage ? isToolTranscriptMessage(nextMessage, i18n) : false
+    if ((index < messages.length - 1 || hasStreaming) && !(currentIsTool && nextIsTool)) {
       rows.push({ kind: 'spacer', key: `${message.id}-spacer` })
     }
   })
 
   return rows
+}
+
+function isSupersededToolRequest(
+  message: ConversationMessage,
+  nextMessage: ConversationMessage | undefined,
+  i18n: AppI18n,
+): boolean {
+  if (!nextMessage) return false
+  const current = parseCliTranscriptMarkup(message.content)
+  const next = parseCliTranscriptMarkup(nextMessage.content)
+  if (!current || current.kind !== 'notice' || !next || next.kind !== 'command-output') return false
+  const currentTool = extractToolName(current.title, i18n)
+  return Boolean(currentTool && currentTool === extractToolName(next.title, i18n))
+}
+
+function isToolTranscriptMessage(message: ConversationMessage, i18n: AppI18n): boolean {
+  const structured = parseCliTranscriptMarkup(message.content)
+  return Boolean(
+    structured &&
+    (structured.kind === 'notice' || structured.kind === 'command-output') &&
+    extractToolName(structured.title, i18n),
+  )
 }
 
 function buildStreamingRows(
@@ -473,7 +518,10 @@ function buildStreamingRows(
   return rows
 }
 
-function renderViewportRow(row: ViewportRow, animateStreamingIndicator: boolean) {
+function renderViewportRow(
+  row: ViewportRow,
+  animateStreamingIndicator: boolean,
+) {
   if (row.kind === 'spacer') {
     return <Text key={row.key}>{' '}</Text>
   }
@@ -481,12 +529,11 @@ function renderViewportRow(row: ViewportRow, animateStreamingIndicator: boolean)
   if (row.kind === 'streaming-header') {
     return (
       <Box key={row.key} width="100%" gap={1}>
-        <Text color={adnifyTheme.brand} bold>◉ otter</Text>
         <ActivityPulse
           active
           animated={animateStreamingIndicator}
           color={adnifyTheme.brandSoft}
-          idleFrame="·  "
+          idleFrame="◌"
           variant="dots"
         />
         <Text color={adnifyTheme.textDim}>{row.label}</Text>
@@ -496,12 +543,16 @@ function renderViewportRow(row: ViewportRow, animateStreamingIndicator: boolean)
 
   if (row.kind === 'tool-header') {
     return (
-      <Box key={row.key} width="100%" gap={1}>
-        <Text color={row.selected ? adnifyTheme.brandStrong : adnifyTheme.textDim} bold={row.selected}>
-          {row.selected ? '›' : ' '}
+      <Box
+        key={row.key}
+        width="100%"
+        gap={1}
+        backgroundColor={row.selected ? adnifyTheme.backgroundHint : undefined}
+      >
+        <Text color={row.selected ? adnifyTheme.brandSoft : row.color} bold={row.selected}>
+          {row.expanded ? '▾' : '▸'}
         </Text>
-        <Text color={row.color} bold>{row.glyph}</Text>
-        <Text color={adnifyTheme.textSecondary} bold>{row.label}</Text>
+        <Text color={adnifyTheme.textSecondary} bold={row.selected}>{row.label}</Text>
         {row.meta ? <Text color={adnifyTheme.textDim}>{row.meta}</Text> : null}
       </Box>
     )
@@ -688,9 +739,7 @@ export const ConversationViewport = memo(function ConversationViewport(
         overflowY="hidden"
         justifyContent="flex-start"
       >
-        {visibleRows.map((row) =>
-          renderViewportRow(row, Boolean(props.animateStreamingIndicator)),
-        )}
+        {visibleRows.map((row) => renderViewportRow(row, Boolean(props.animateStreamingIndicator)))}
       </Box>
     </Box>
   )

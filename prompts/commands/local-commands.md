@@ -9,7 +9,6 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :workspace
 - :status
 - :tools
-- :tool-focus
 - :doctor
 - :diff
 - :review
