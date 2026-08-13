@@ -79,6 +79,36 @@ test('computeKey differs when model changes', () => {
   expect(key1).not.toBe(key2)
 })
 
+test('computeKey differs when tools change', () => {
+  const messages = [{ role: 'user', content: 'hello' }]
+  const toolsA = [{ name: 'file-ops' }, { name: 'shell-runner' }]
+  const toolsB = [{ name: 'file-ops' }, { name: 'web-search' }]
+  const key1 = ResponseCache.computeKey(messages, 'gpt-4', 0.7, 4096, toolsA)
+  const key2 = ResponseCache.computeKey(messages, 'gpt-4', 0.7, 4096, toolsB)
+  expect(key1).not.toBe(key2)
+})
+
+test('computeKey same when tools are same but order differs', () => {
+  const messages = [{ role: 'user', content: 'hello' }]
+  const toolsA = [{ name: 'file-ops' }, { name: 'shell-runner' }]
+  const toolsB = [{ name: 'shell-runner' }, { name: 'file-ops' }]
+  const key1 = ResponseCache.computeKey(messages, 'gpt-4', 0.7, 4096, toolsA)
+  const key2 = ResponseCache.computeKey(messages, 'gpt-4', 0.7, 4096, toolsB)
+  expect(key1).toBe(key2)
+})
+
+test('computeKey differs when tools added or removed', () => {
+  const messages = [{ role: 'user', content: 'hello' }]
+  const toolsA = [{ name: 'file-ops' }, { name: 'shell-runner' }]
+  const toolsB = [{ name: 'file-ops' }]
+  const keyNoTools = ResponseCache.computeKey(messages, 'gpt-4', 0.7, 4096)
+  const keyTwoTools = ResponseCache.computeKey(messages, 'gpt-4', 0.7, 4096, toolsA)
+  const keyOneTool = ResponseCache.computeKey(messages, 'gpt-4', 0.7, 4096, toolsB)
+  expect(keyNoTools).not.toBe(keyTwoTools)
+  expect(keyTwoTools).not.toBe(keyOneTool)
+  expect(keyNoTools).not.toBe(keyOneTool)
+})
+
 test('overwrite updates value for same key', () => {
   const cache = new ResponseCache<string>()
   cache.set('k', 'old')

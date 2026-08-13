@@ -22,7 +22,7 @@ export class BootstrapCliUseCase {
 
   async execute(command: BootstrapCliCommand): Promise<BootstrapSnapshot> {
     this.logger.info(
-      this.i18n.locale === 'en' ? 'Bootstrapping Adnify-Cli runtime' : '正在启动 Adnify-Cli 运行时',
+      this.i18n.t('app.boot.runtimeStarting'),
       { cwd: command.cwd },
     )
 

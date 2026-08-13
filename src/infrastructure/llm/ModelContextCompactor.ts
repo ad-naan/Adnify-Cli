@@ -5,21 +5,28 @@ import type { CompactionResult } from '../../domain/session/value-objects/Compac
 import { estimateTokens, shouldCompact } from '../../domain/session/value-objects/CompactionResult'
 
 /**
- * 压缩时保留近期消息的最小条数。
+ * 压缩参数默认值。
  */
-const KEEP_RECENT_MESSAGES = 6
-
-/**
- * 触发压缩的阈值比例（占 maxTokens）。
- */
-const COMPACTION_THRESHOLD = 0.85
-
-/**
- * 摘要输出目标为待压缩内容的 25%，并受 4096 tokens 硬上限约束。
- */
-const COMPACTION_TARGET_RATIO = 0.25
+const DEFAULT_KEEP_RECENT_MESSAGES = 6
+const DEFAULT_COMPACTION_THRESHOLD = 0.85
+const DEFAULT_COMPACTION_TARGET_RATIO = 0.25
+const DEFAULT_MAX_OUTPUT_TOKENS = 4_096
 const MIN_COMPACTABLE_TOKENS = 1_024
 const MIN_SAVINGS_TOKENS = 512
+
+/**
+ * 压缩器可配置参数。
+ */
+export interface CompactionOptions {
+  /** 压缩时保留近期消息的最小条数。 */
+  keepRecentMessages?: number
+  /** 触发压缩的阈值比例（占 maxTokens）。 */
+  threshold?: number
+  /** 压缩后目标的 token 占比（压缩到 maxTokens 的该比例以内）。 */
+  targetRatio?: number
+  /** 摘要输出的最大 token 数。 */
+  maxOutputTokens?: number
+}
 
 /**
  * 基于模型的上下文压缩器。
@@ -31,23 +38,36 @@ const MIN_SAVINGS_TOKENS = 512
  * 4. 摘要 + 近期消息组成新的消息列表
  */
 export class ModelContextCompactor implements ContextCompactionPort {
+  private readonly keepRecentMessages: number
+  private readonly threshold: number
+  private readonly targetRatio: number
+  private readonly maxOutputTokens: number
+
   constructor(
     private readonly gateway: ModelGatewayPort,
     private readonly contextWindowTokens: number,
     private readonly logger: LoggerPort,
     private readonly summarizeModel?: string,
-    private readonly maxOutputTokens = 4_096,
-  ) {}
+    options?: CompactionOptions,
+  ) {
+    this.keepRecentMessages = options?.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
+    this.threshold = options?.threshold ?? DEFAULT_COMPACTION_THRESHOLD
+    this.targetRatio = options?.targetRatio ?? DEFAULT_COMPACTION_TARGET_RATIO
+    this.maxOutputTokens = options?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+  }
 
   needsCompaction(messages: ModelMessage[], maxTokens: number): boolean {
     const contextWindowTokens = maxTokens || this.contextWindowTokens
     const conversationMessages = messages.filter((message) => message.role !== 'system')
-    const compactable = conversationMessages.slice(0, Math.max(0, conversationMessages.length - KEEP_RECENT_MESSAGES))
+    const compactable = conversationMessages.slice(
+      0,
+      Math.max(0, conversationMessages.length - this.keepRecentMessages),
+    )
     if (estimateTokens(compactable) < MIN_COMPACTABLE_TOKENS) return false
 
     const reservedOutputTokens = Math.max(8_192, Math.ceil(this.maxOutputTokens * 1.25))
     const usableInputTokens = Math.max(4_096, contextWindowTokens - reservedOutputTokens)
-    return shouldCompact(messages, usableInputTokens, COMPACTION_THRESHOLD)
+    return shouldCompact(messages, usableInputTokens, this.threshold)
   }
 
   async compact(
@@ -61,8 +81,8 @@ export class ModelContextCompactor implements ContextCompactionPort {
     const systemMessages = messages.filter((m) => m.role === 'system')
     const conversationMessages = messages.filter((m) => m.role !== 'system')
 
-    // 确定保留边界：保留最后 KEEP_RECENT_MESSAGES 条对话消息
-    const keepCount = Math.min(KEEP_RECENT_MESSAGES, conversationMessages.length)
+    // 确定保留边界：保留最后 keepRecentMessages 条对话消息
+    const keepCount = Math.min(this.keepRecentMessages, conversationMessages.length)
     const keepStart = conversationMessages.length - keepCount
     const toCompact = conversationMessages.slice(0, keepStart)
     const toKeep = conversationMessages.slice(keepStart)
@@ -165,8 +185,8 @@ export class ModelContextCompactor implements ContextCompactionPort {
       maxTokens: Math.max(
         512,
         Math.min(
-          4_096,
-          Math.floor(estimateTokens(messages) * COMPACTION_TARGET_RATIO),
+          this.maxOutputTokens,
+          Math.floor(estimateTokens(messages) * this.targetRatio),
           Math.floor(contextWindowTokens * 0.05),
         ),
       ),

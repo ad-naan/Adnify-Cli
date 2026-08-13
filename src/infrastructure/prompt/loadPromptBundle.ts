@@ -14,12 +14,15 @@ const PROMPT_ROOT = basename(moduleDirectory) === 'dist'
   : join(moduleDirectory, '../../../prompts')
 
 export async function loadPromptBundle(): Promise<PromptBundle> {
-  const profileDocument = await readMarkdownDocument(join(PROMPT_ROOT, 'assistant/profile.md'))
-  const coreDocument = await readMarkdownDocument(join(PROMPT_ROOT, 'system/core.md'))
-  const chatModeDocument = await readMarkdownDocument(join(PROMPT_ROOT, 'system/modes/chat.md'))
-  const agentModeDocument = await readMarkdownDocument(join(PROMPT_ROOT, 'system/modes/agent.md'))
-  const planModeDocument = await readMarkdownDocument(join(PROMPT_ROOT, 'system/modes/plan.md'))
-  const localCommandsDocument = await readMarkdownDocument(join(PROMPT_ROOT, 'commands/local-commands.md'))
+  const [profileDocument, coreDocument, chatModeDocument, agentModeDocument, planModeDocument, localCommandsDocument] =
+    await Promise.all([
+      readMarkdownDocument(join(PROMPT_ROOT, 'assistant/profile.md')),
+      readMarkdownDocument(join(PROMPT_ROOT, 'system/core.md')),
+      readMarkdownDocument(join(PROMPT_ROOT, 'system/modes/chat.md')),
+      readMarkdownDocument(join(PROMPT_ROOT, 'system/modes/agent.md')),
+      readMarkdownDocument(join(PROMPT_ROOT, 'system/modes/plan.md')),
+      readMarkdownDocument(join(PROMPT_ROOT, 'commands/local-commands.md')),
+    ])
 
   const toolFiles = [
     'tools/workspace-read.md',

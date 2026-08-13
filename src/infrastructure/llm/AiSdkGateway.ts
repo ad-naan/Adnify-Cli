@@ -98,6 +98,7 @@ export class AiSdkGateway implements ModelGatewayPort {
       request.model,
       request.temperature,
       request.maxTokens,
+      request.tools?.map((t) => ({ name: t.name })),
     )
 
     const cached = this.cache.get(cacheKey)

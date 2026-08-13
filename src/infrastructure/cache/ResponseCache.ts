@@ -20,7 +20,6 @@ function fnv1aHash(input: string): string {
 interface CacheEntry<V> {
   value: V
   expiresAt: number
-  accessTick: number
 }
 
 /**
@@ -33,10 +32,12 @@ interface CacheEntry<V> {
  * - 只缓存非流式结果（完整文本），命中后模拟流式输出
  * - TTL 到期自动失效
  * - 容量上限防止内存膨胀
+ *
+ * LRU 实现：利用 Map 的插入顺序特性——delete + re-insert 将条目移到末尾（MRU），
+ * 首个条目即为 LRU，O(1) 逐出，无需遍历或额外 tick 计数器。
  */
 export class ResponseCache<V = string> {
   private readonly store = new Map<string, CacheEntry<V>>()
-  private tick = 0
 
   constructor(
     private readonly maxEntries = 64,
@@ -44,8 +45,11 @@ export class ResponseCache<V = string> {
   ) {}
 
   /**
-   * 根据消息列表和模型参数生成缓存 key。
-   * 取所有消息参与 hash，保证任何消息变化时 key 也变化。
+   * 根据消息列表、模型参数和工具定义生成缓存 key。
+   * 取所有消息和工具参与 hash，保证任何变化时 key 也变化。
+   *
+   * tools 必须纳入 hash：工具定义变更后仍命中旧缓存，会导致模型用错误的工具集
+   * 产出过时响应（例如新增了 file-ops 但缓存重放的回答不含工具调用）。
    */
   static computeKey(
     messages: ReadonlyArray<{
@@ -59,6 +63,7 @@ export class ResponseCache<V = string> {
     model: string,
     temperature?: number,
     maxTokens?: number,
+    tools?: ReadonlyArray<{ name: string; [key: string]: unknown }>,
   ): string {
     const payload = JSON.stringify({
       m: messages.map((m) => ({
@@ -72,6 +77,7 @@ export class ResponseCache<V = string> {
       model,
       t: temperature ?? -1,
       mt: maxTokens ?? -1,
+      tl: tools?.map((t) => t.name).sort() ?? [],
     })
     return fnv1aHash(payload)
   }
@@ -87,19 +93,23 @@ export class ResponseCache<V = string> {
       return undefined
     }
 
-    entry.accessTick = ++this.tick
+    // Move to MRU position: delete then re-insert preserves Map insertion order
+    this.store.delete(key)
+    this.store.set(key, entry)
     return entry.value
   }
 
   set(key: string, value: V, ttlMs?: number): void {
-    if (this.store.size >= this.maxEntries) {
+    // If key already exists, delete first so re-insert places it at MRU position
+    if (this.store.has(key)) {
+      this.store.delete(key)
+    } else if (this.store.size >= this.maxEntries) {
       this.evictLRU()
     }
 
     this.store.set(key, {
       value,
       expiresAt: Date.now() + (ttlMs ?? this.defaultTtlMs),
-      accessTick: ++this.tick,
     })
   }
 
@@ -111,18 +121,12 @@ export class ResponseCache<V = string> {
     return this.store.size
   }
 
+  /**
+   * O(1) eviction: Map iterates in insertion order, so the first entry is the LRU.
+   */
   private evictLRU(): void {
-    let oldestKey: string | null = null
-    let oldestTick = Infinity
-
-    for (const [key, entry] of this.store) {
-      if (entry.accessTick < oldestTick) {
-        oldestTick = entry.accessTick
-        oldestKey = key
-      }
-    }
-
-    if (oldestKey) {
+    const oldestKey = this.store.keys().next().value
+    if (oldestKey !== undefined) {
       this.store.delete(oldestKey)
     }
   }

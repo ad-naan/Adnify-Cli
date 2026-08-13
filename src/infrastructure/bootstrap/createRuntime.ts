@@ -167,7 +167,17 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const codeIndexer = new TsLanguageServiceIndexer(logger)
   const repoMapBuilder = new GraphRepoMapBuilder(logger)
 
-  const initialStack = createResponderStack(modelConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer, hookRegistry)
+  const initialStack = createResponderStack({
+    modelConfig,
+    config,
+    toolExecutor,
+    logger,
+    i18n,
+    skillService,
+    repoMapBuilder,
+    codeIndexer,
+    hookRegistry,
+  })
   let currentResponder = initialStack.responder
   let currentGateway = initialStack.gateway
 
@@ -207,7 +217,17 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
       return newConfig
     }
 
-    const newStack = createResponderStack(newConfig, config, toolExecutor, logger, i18n, skillService, repoMapBuilder, codeIndexer, hookRegistry)
+    const newStack = createResponderStack({
+      modelConfig: newConfig,
+      config,
+      toolExecutor,
+      logger,
+      i18n,
+      skillService,
+      repoMapBuilder,
+      codeIndexer,
+      hookRegistry,
+    })
     currentResponder = newStack.responder
     currentGateway = newStack.gateway
     submitPrompt.updateResponder(currentResponder)
@@ -262,17 +282,31 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   }
 }
 
-function createResponderStack(
-  modelConfig: ModelConfig,
-  config: DefaultCliConfigAdapter,
-  toolExecutor: ToolExecutorPort,
-  logger: LoggerPort,
-  i18n: ReturnType<typeof createAppI18n>,
-  skillService?: SkillService,
-  repoMapBuilder?: GraphRepoMapBuilder,
-  codeIndexer?: TsLanguageServiceIndexer,
-  hookRegistry?: DefaultHookRegistry,
-) {
+interface ResponderStackConfig {
+  modelConfig: ModelConfig
+  config: DefaultCliConfigAdapter
+  toolExecutor: ToolExecutorPort
+  logger: LoggerPort
+  i18n: ReturnType<typeof createAppI18n>
+  skillService?: SkillService
+  repoMapBuilder?: GraphRepoMapBuilder
+  codeIndexer?: TsLanguageServiceIndexer
+  hookRegistry?: DefaultHookRegistry
+}
+
+function createResponderStack(cfg: ResponderStackConfig) {
+  const {
+    modelConfig,
+    config,
+    toolExecutor,
+    logger,
+    i18n,
+    skillService,
+    repoMapBuilder,
+    codeIndexer,
+    hookRegistry,
+  } = cfg
+
   if (!modelConfig.apiKey) {
     logger.info('No API key configured, using unconfigured responder')
     return { responder: new UnconfiguredAssistantResponder(logger, i18n), gateway: null }

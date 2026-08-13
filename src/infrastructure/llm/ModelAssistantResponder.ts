@@ -112,24 +112,23 @@ export class ModelAssistantResponder implements AssistantResponderPort {
             contextWindowTokens,
             command.abortSignal,
           )
-          if (result.compactedCount > 0) {
-            activeMessages = result.messages
-            yield {
-              kind: 'transcript',
-              delta: '',
-              transcript: createCliNoticeContent(
-                [
-                  this.i18n.locale === 'en'
-                    ? `Context compressed: ${result.compactedCount} messages summarized (${result.tokensBefore} → ${result.tokensAfter} tokens). Original conversation remains available: Ctrl+O opens the full transcript; PgUp/PgDn browses history.`
-                    : `上下文已压缩：摘要了 ${result.compactedCount} 条消息（${result.tokensBefore} → ${result.tokensAfter} tokens）。原始会话仍然保留：Ctrl+O 打开完整记录，PgUp/PgDn 浏览历史。`,
-                ].join('\n'),
-                {
-                  title: this.i18n.locale === 'en' ? 'Context Compacted' : '上下文已压缩',
-                  tone: 'info',
-                },
-              ),
-              done: false,
-            }
+          activeMessages = result.messages
+
+          yield {
+            kind: 'transcript',
+            delta: '',
+            transcript: createCliNoticeContent(
+              this.i18n.t('transcript.contextCompacted', {
+                compactedCount: result.compactedCount,
+                tokensBefore: result.tokensBefore,
+                tokensAfter: result.tokensAfter,
+              }),
+              {
+                title: this.i18n.t('transcript.contextCompactedTitle'),
+                tone: 'info',
+              },
+            ),
+            done: false,
           }
         }
         // Hook: beforeModelRequest (a before* hook returning false aborts)
@@ -283,9 +282,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           delta: '',
           transcript: createCliNoticeContent(
             [
-              this.i18n.locale === 'en'
-                ? `Executing assistant tool request (turn ${turn + 1}/${this.maxAgentTurns}).`
-                : `正在执行助手工具请求（第 ${turn + 1}/${this.maxAgentTurns} 轮）。`,
+              this.i18n.t('transcript.executingTool', {
+                turn: turn + 1,
+                maxTurns: this.maxAgentTurns,
+              }),
               `tool: ${toolCall.name}`,
               `input: ${this.truncateForTranscript(toolCall.input, 400)}`,
             ].join('\n'),
@@ -311,9 +311,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
               kind: 'transcript',
               delta: '',
               transcript: createCliNoticeContent(
-                this.i18n.locale === 'en'
-                  ? 'Tool execution blocked by a hook handler.'
-                  : '工具执行被 hook 拦截。',
+                this.i18n.t('transcript.toolBlocked'),
                 {
                   title: `${this.i18n.t('transcript.tools')} · ${toolCall.name}`,
                   tone: 'warning',
@@ -415,12 +413,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           transcript: createCliCommandOutputContent(
             [
               toolResult.ok
-                ? this.i18n.locale === 'en'
-                  ? 'Tool completed successfully.'
-                  : '工具执行成功完成。'
-                : this.i18n.locale === 'en'
-                  ? 'Tool execution failed.'
-                  : '工具执行失败。',
+                ? this.i18n.t('transcript.toolSuccess')
+                : this.i18n.t('transcript.toolFailed'),
               `elapsed: ${elapsedLabel}`,
               '',
               this.truncateForTranscript(toolResult.content, 1600),
@@ -473,10 +467,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
       yield {
         kind: 'text',
-        delta:
-          this.i18n.locale === 'en'
-            ? 'I reached the current tool-execution turn limit. Please refine the request or continue.'
-            : '已达到当前工具执行轮次上限，请继续细化需求或再次发起执行。',
+        delta: this.i18n.t('transcript.turnLimit'),
         done: true,
       }
     } catch (error) {

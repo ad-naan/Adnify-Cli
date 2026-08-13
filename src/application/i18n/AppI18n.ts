@@ -20,6 +20,7 @@ const messages = {
     'app.boot.heading': '正在启动 Adnify-Cli',
     'app.boot.description': '正在装配运行时、工作区上下文与模型配置。',
     'app.boot.failed': '启动失败',
+    'app.boot.runtimeStarting': '正在启动 Adnify-Cli 运行时',
 
     'header.meta.workspace': 'workspace ',
     'header.meta.package': 'pkg ',
@@ -108,6 +109,13 @@ const messages = {
     'transcript.conversation': '会话',
     'transcript.session': '会话',
     'transcript.command': '命令',
+    'transcript.contextCompacted': '上下文已压缩：摘要了 {compactedCount} 条消息（{tokensBefore} → {tokensAfter} tokens）。',
+    'transcript.contextCompactedTitle': '上下文已压缩',
+    'transcript.executingTool': '正在执行助手工具请求（第 {turn}/{maxTurns} 轮）。',
+    'transcript.toolBlocked': '工具执行被 hook 拦截。',
+    'transcript.toolSuccess': '工具执行成功完成。',
+    'transcript.toolFailed': '工具执行失败。',
+    'transcript.turnLimit': '已达到当前工具执行轮次上限，请继续细化需求或再次发起执行。',
 
     'config.selectProviderTitle': '请选择 AI Provider：',
     'config.customProvider': '自定义 OpenAI 兼容端点',
@@ -429,6 +437,7 @@ const messages = {
     'app.boot.heading': 'Bootstrapping Adnify-Cli',
     'app.boot.description': 'Preparing runtime services, workspace context, and model configuration.',
     'app.boot.failed': 'Boot failed',
+    'app.boot.runtimeStarting': 'Bootstrapping Adnify-Cli runtime',
 
     'header.meta.workspace': 'workspace ',
     'header.meta.package': 'pkg ',
@@ -518,6 +527,13 @@ const messages = {
     'transcript.conversation': 'conversation',
     'transcript.session': 'session',
     'transcript.command': 'command',
+    'transcript.contextCompacted': 'Context compressed: {compactedCount} messages summarized ({tokensBefore} → {tokensAfter} tokens).',
+    'transcript.contextCompactedTitle': 'Context Compacted',
+    'transcript.executingTool': 'Executing assistant tool request (turn {turn}/{maxTurns}).',
+    'transcript.toolBlocked': 'Tool execution blocked by a hook handler.',
+    'transcript.toolSuccess': 'Tool completed successfully.',
+    'transcript.toolFailed': 'Tool execution failed.',
+    'transcript.turnLimit': 'I reached the current tool-execution turn limit. Please refine the request or continue.',
 
     'config.selectProviderTitle': 'Select an AI provider:',
     'config.customProvider': 'Custom OpenAI-compatible endpoint',
