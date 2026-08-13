@@ -48,12 +48,13 @@ export class ModelContextCompactor implements ContextCompactionPort {
     private readonly contextWindowTokens: number,
     private readonly logger: LoggerPort,
     private readonly summarizeModel?: string,
-    options?: CompactionOptions,
+    options?: CompactionOptions | number,
   ) {
-    this.keepRecentMessages = options?.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
-    this.threshold = options?.threshold ?? DEFAULT_COMPACTION_THRESHOLD
-    this.targetRatio = options?.targetRatio ?? DEFAULT_COMPACTION_TARGET_RATIO
-    this.maxOutputTokens = options?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+    const resolvedOptions = typeof options === 'number' ? { maxOutputTokens: options } : options
+    this.keepRecentMessages = resolvedOptions?.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
+    this.threshold = resolvedOptions?.threshold ?? DEFAULT_COMPACTION_THRESHOLD
+    this.targetRatio = resolvedOptions?.targetRatio ?? DEFAULT_COMPACTION_TARGET_RATIO
+    this.maxOutputTokens = resolvedOptions?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
   }
 
   needsCompaction(messages: ModelMessage[], maxTokens: number): boolean {

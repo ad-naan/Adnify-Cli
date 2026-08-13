@@ -457,6 +457,65 @@ describe('SubmitPromptUseCase', () => {
     expect(messages[2]?.content).toBe('done')
   })
 
+  test('executeStreaming should preserve assistant text around tool transcripts', async () => {
+    const repo = createMockSessionRepo()
+    const session = ConversationSession.create({
+      id: 'sess-ordered',
+      title: 'test',
+      mode: 'agent',
+      workspacePath: '/test',
+      createdAt: new Date('2026-01-01'),
+    })
+    await repo.save(session)
+
+    const orderedResponder: AssistantResponderPort = {
+      generateReply: async () => ({ content: '' }),
+      async *streamReply() {
+        yield { kind: 'text', delta: 'I will inspect this first.', done: false }
+        yield {
+          kind: 'transcript',
+          delta: '',
+          transcript: '<adnify-notice title="tools" tone="info">reading</adnify-notice>',
+          done: false,
+        }
+        yield { kind: 'text', delta: 'The inspection is complete.', done: false }
+      },
+      async *streamApprovalDecision() {
+        yield { kind: 'text', delta: '', done: true }
+      },
+    }
+
+    const useCase = new SubmitPromptUseCase(
+      repo,
+      createMockWorkspace(),
+      orderedResponder,
+      createMockConfig(),
+      createMockIdGenerator(),
+      createMockClock(new Date('2026-01-01T00:01:00Z')),
+      createMockLogger(),
+      createAppI18n('en'),
+    )
+
+    const segments: string[] = []
+    const result = await useCase.executeStreaming(
+      { sessionId: session.id, prompt: 'inspect' },
+      {
+        onChunk: () => {},
+        onAssistantSegment: (content) => segments.push(content),
+        onDone: () => {},
+        onError: () => {},
+      },
+    )
+
+    expect(result.session.getMessages().map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'system',
+      'assistant',
+    ])
+    expect(segments).toEqual(['I will inspect this first.', 'The inspection is complete.'])
+  })
+
   test('executeStreaming should pause on pending approval without appending assistant text', async () => {
     const repo = createMockSessionRepo()
     const session = ConversationSession.create({

@@ -26,8 +26,30 @@ import {
 import { formatWorkspaceSummary } from '../support/formatWorkspaceSummary'
 import { PROVIDER_PRESETS } from '../../infrastructure/config/providerPresets'
 import { estimateTokens } from '../../domain/session/value-objects/CompactionResult'
+import {
+  RUNTIME_BUDGET_LIMITS,
+  formatRuntimeBudget,
+  type RuntimeBudget,
+  type RuntimeBudgetPort,
+} from '../ports/RuntimeBudgetPort'
 
 const execFileAsync = promisify(execFile)
+
+const RUNTIME_BUDGET_KEYS: Record<string, keyof RuntimeBudget> = {
+  'max-steps': 'maxStepsPerTurn',
+  retries: 'maxModelRetries',
+  'retry-delay': 'retryBaseDelayMs',
+  'duplicate-limit': 'duplicateToolCallLimit',
+  'subagent-concurrency': 'maxSubAgentConcurrency',
+  subtasks: 'maxSubTasksPerBatch',
+  'tool-timeout': 'toolTimeoutMs',
+  'task-timeout': 'taskTimeoutMs',
+}
+
+function resolveRuntimeBudgetKey(value: string | undefined): keyof RuntimeBudget | undefined {
+  if (!value) return undefined
+  return RUNTIME_BUDGET_KEYS[value] ?? (value in RUNTIME_BUDGET_LIMITS ? value as keyof RuntimeBudget : undefined)
+}
 
 export interface ModelSwitcher {
   switchModel: (providerName: string, modelName?: string) => { model: string; baseUrl: string } | null
@@ -103,6 +125,7 @@ export class ApplyCliCommandUseCase {
     private readonly clock: ClockPort,
     private readonly logger: LoggerPort,
     private readonly i18n: AppI18n,
+    private readonly runtimeBudget?: RuntimeBudgetPort,
   ) {}
 
   async execute(command: ApplyCliCommandCommand): Promise<ApplyCliCommandResult> {
@@ -766,6 +789,50 @@ export class ApplyCliCommandUseCase {
         const message = this.i18n.t('cli.permissions.saved', { value: mode })
         addCommandOutput(message, { title: this.i18n.t('transcript.config'), tone: 'success' })
         return persist(message)
+      }
+
+      case 'runtime': {
+        addCommandInput()
+        if (!this.runtimeBudget) {
+          const message = this.i18n.locale === 'en' ? 'Runtime budget control is unavailable.' : '运行时预算控制不可用。'
+          addCommandOutput(message, { title: 'Runtime budget', tone: 'warning' })
+          return persist(message)
+        }
+
+        const subcommand = args[0]?.toLowerCase()
+        if (!subcommand || subcommand === 'show') {
+          const message = formatRuntimeBudget(this.runtimeBudget.get())
+          addCommandOutput(message, { title: 'Runtime budget', tone: 'info' })
+          return persist(this.i18n.locale === 'en' ? 'Runtime budget displayed.' : '已显示运行时预算。')
+        }
+
+        if (subcommand === 'reset') {
+          const budget = this.runtimeBudget.reset()
+          await this.storageSettings.setRuntimeBudget?.(budget)
+          const message = formatRuntimeBudget(budget)
+          addCommandOutput(message, { title: 'Runtime budget', tone: 'success' })
+          return persist(this.i18n.locale === 'en' ? 'Runtime budget reset.' : '运行时预算已恢复默认值。')
+        }
+
+        const key = resolveRuntimeBudgetKey(args[1])
+        const value = Number(args[2])
+        if (subcommand !== 'set' || !key || !Number.isInteger(value)) {
+          const usage = ':runtime [show|reset]\n:runtime set <max-steps|retries|retry-delay|duplicate-limit|subagent-concurrency|subtasks|tool-timeout|task-timeout> <integer>'
+          addCommandOutput(usage, { title: 'Runtime budget', tone: 'warning' })
+          return persist(this.i18n.locale === 'en' ? 'Invalid runtime budget command.' : '运行时预算命令无效。')
+        }
+
+        const [min, max] = RUNTIME_BUDGET_LIMITS[key]
+        if (value < min || value > max) {
+          const message = `${key} must be from ${min} to ${max}.`
+          addCommandOutput(message, { title: 'Runtime budget', tone: 'warning' })
+          return persist(message)
+        }
+
+        const budget = this.runtimeBudget.update({ [key]: value })
+        await this.storageSettings.setRuntimeBudget?.(budget)
+        addCommandOutput(formatRuntimeBudget(budget), { title: 'Runtime budget', tone: 'success' })
+        return persist(this.i18n.locale === 'en' ? `${key} saved as ${value}.` : `${key} 已保存为 ${value}。`)
       }
 
       case 'session': {

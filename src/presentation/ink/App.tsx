@@ -15,12 +15,17 @@ import { estimateTokens } from '../../domain/session/value-objects/CompactionRes
 import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import { adnifyTheme } from './theme'
 import { ActivityPulse } from './components/ActivityPulse'
-import { ConversationViewport, conversationBodyRows } from './components/ConversationViewport'
+import {
+  ConversationViewport,
+  collectToolMessageIds,
+  conversationBodyRows,
+} from './components/ConversationViewport'
 import { EmptyState } from './components/EmptyState'
 import { HeaderBar } from './components/HeaderBar'
 import { InputDock } from './components/InputDock'
 import { Panel } from './components/Panel'
 import { StatusDock } from './components/StatusDock'
+import { TaskDock } from './components/TaskDock'
 import { useCliController } from './hooks/useCliController'
 import { useViewportScroll } from './hooks/useViewportScroll'
 
@@ -52,12 +57,21 @@ export function App(props: AppProps) {
     [controller.streamingMessages, session],
   )
   const showEmptyState = Boolean(session) && messages.length === 0 && !controller.streamingText
+  const toolMessageIds = useMemo(() => collectToolMessageIds(messages, i18n), [i18n, messages])
   const [isTranscriptView, setIsTranscriptView] = useState(false)
+  const [selectedToolMessageId, setSelectedToolMessageId] = useState<string | undefined>()
+  const [expandedToolMessageIds, setExpandedToolMessageIds] = useState<string[]>([])
+  const [isToolBrowseMode, setIsToolBrowseMode] = useState(false)
   const [totalViewportRows, setTotalViewportRows] = useState(0)
 
   useEffect(() => {
     if (controller.toolApprovalPrompt || controller.userInteractionPrompt || controller.configInitPrompt) setIsTranscriptView(false)
   }, [controller.configInitPrompt, controller.toolApprovalPrompt, controller.userInteractionPrompt])
+
+  useEffect(() => {
+    setExpandedToolMessageIds((current) => current.filter((id) => toolMessageIds.includes(id)))
+    setSelectedToolMessageId((current) => current && toolMessageIds.includes(current) ? current : undefined)
+  }, [toolMessageIds])
 
   // Ink 7 measures the actual flex child after every layout pass. No guessed header/input row counts.
   const conversationViewportRows = conversationMetrics.hasMeasured
@@ -70,8 +84,89 @@ export function App(props: AppProps) {
 
   const handleInput = useCallback(
     (input: string, key: Parameters<typeof controller.handleInput>[1]) => {
+      const toggleSelectedTool = () => {
+        const targetId = selectedToolMessageId ?? toolMessageIds[toolMessageIds.length - 1]
+        if (!targetId) return
+        setSelectedToolMessageId(targetId)
+        setExpandedToolMessageIds((current) =>
+          current.includes(targetId)
+            ? current.filter((id) => id !== targetId)
+            : [...current, targetId],
+        )
+      }
+
+      if (isToolBrowseMode) {
+        if (key.escape || input.toLowerCase() === 'q') {
+          setIsToolBrowseMode(false)
+          setSelectedToolMessageId(undefined)
+          return
+        }
+        if (key.upArrow || key.downArrow) {
+          const currentIndex = selectedToolMessageId
+            ? toolMessageIds.indexOf(selectedToolMessageId)
+            : toolMessageIds.length - 1
+          const nextIndex = key.upArrow
+            ? Math.max(0, currentIndex - 1)
+            : Math.min(toolMessageIds.length - 1, Math.max(0, currentIndex + 1))
+          setSelectedToolMessageId(toolMessageIds[nextIndex])
+          return
+        }
+        if (key.return || input === ' ') {
+          toggleSelectedTool()
+          return
+        }
+        return
+      }
+
+      if (key.return && controller.inputValue.trim().toLowerCase() === ':tool-focus') {
+        controller.clearInput()
+        if (toolMessageIds.length > 0) {
+          setIsToolBrowseMode(true)
+          setSelectedToolMessageId(toolMessageIds[toolMessageIds.length - 1])
+        }
+        return
+      }
+
       if (key.ctrl && input === 'o' && !controller.toolApprovalPrompt && !controller.configInitPrompt) {
         setIsTranscriptView((current) => !current)
+        setSelectedToolMessageId(undefined)
+        return
+      }
+
+      if (
+        key.ctrl &&
+        (key.upArrow || key.downArrow) &&
+        !isTranscriptView &&
+        !controller.toolApprovalPrompt &&
+        !controller.userInteractionPrompt &&
+        !controller.configInitPrompt &&
+        toolMessageIds.length > 0
+      ) {
+        const currentIndex = selectedToolMessageId
+          ? toolMessageIds.indexOf(selectedToolMessageId)
+          : toolMessageIds.length
+        const nextIndex = key.upArrow
+          ? Math.max(0, currentIndex - 1)
+          : Math.min(toolMessageIds.length - 1, currentIndex < 0 ? toolMessageIds.length - 1 : currentIndex + 1)
+        setSelectedToolMessageId(toolMessageIds[nextIndex])
+        setIsToolBrowseMode(true)
+        return
+      }
+
+      if (
+        key.ctrl &&
+        input === 'e' &&
+        !isTranscriptView &&
+        !controller.toolApprovalPrompt &&
+        !controller.userInteractionPrompt &&
+        !controller.configInitPrompt
+      ) {
+        toggleSelectedTool()
+        return
+      }
+
+      if (key.escape && selectedToolMessageId) {
+        setSelectedToolMessageId(undefined)
         return
       }
 
@@ -104,17 +199,23 @@ export function App(props: AppProps) {
     },
     [
       controller.configInitPrompt,
+      controller.clearInput,
       controller.handleInput,
+      controller.inputValue,
       controller.isBusy,
       controller.toolApprovalPrompt,
+      controller.userInteractionPrompt,
       conversationViewportRows,
       isTranscriptView,
+      isToolBrowseMode,
+      selectedToolMessageId,
       scroll,
+      toolMessageIds,
     ],
   )
 
   useInput(handleInput)
-  usePaste(controller.handlePaste, { isActive: !isTranscriptView })
+  usePaste(controller.handlePaste, { isActive: !isTranscriptView && !isToolBrowseMode })
 
   if (controller.isBooting) {
     return (
@@ -187,7 +288,7 @@ export function App(props: AppProps) {
             workspaceName={workspaceName}
             packageManager={workspace!.packageManager}
             isGitRepository={workspace!.isGitRepository}
-            mode={session.mode}
+            mode={controller.activeMode}
             modelLabel={modelLabel}
             busy={controller.isBusy}
             animateBrand={enableFullAnimation}
@@ -206,7 +307,7 @@ export function App(props: AppProps) {
             workspaceName={workspaceName}
             packageManager={workspace!.packageManager}
             isGitRepository={workspace!.isGitRepository}
-            mode={session.mode}
+            mode={controller.activeMode}
             modelLabel={modelLabel}
             busy={controller.isBusy}
             animateBrand={enableFullAnimation}
@@ -221,6 +322,8 @@ export function App(props: AppProps) {
               scrollOffset={scroll.offset}
               onTotalRowsChange={setTotalViewportRows}
               animateStreamingIndicator={enableFullAnimation}
+              expandedToolMessageIds={expandedToolMessageIds}
+              selectedToolMessageId={selectedToolMessageId}
               i18n={i18n}
             />
           </Box>
@@ -229,12 +332,13 @@ export function App(props: AppProps) {
 
       {!isTranscriptView ? (
         <Box width="100%" flexDirection="column" flexShrink={0}>
+          <TaskDock tasks={controller.activeTasks} i18n={i18n} />
           <InputDock
             value={controller.inputValue}
             cursor={controller.inputCursor}
             busy={controller.isBusy}
             animateBusyIndicator={enableFullAnimation}
-            mode={session.mode}
+            mode={controller.activeMode}
             modelLabel={modelLabel}
             configInitPrompt={controller.configInitPrompt}
             toolApprovalPrompt={controller.toolApprovalPrompt}
@@ -244,6 +348,7 @@ export function App(props: AppProps) {
             isSuggestionOpen={controller.isSuggestionOpen}
             choiceItems={controller.choiceItems}
             selectedChoiceIndex={controller.selectedChoiceIndex}
+            toolBrowseActive={isToolBrowseMode}
             i18n={i18n}
           />
           <StatusDock
@@ -252,7 +357,7 @@ export function App(props: AppProps) {
             isConfigured={Boolean(modelConfig!.apiKey)}
             workspaceName={workspaceName}
             isGitRepository={workspace!.isGitRepository}
-            mode={session.mode}
+            mode={controller.activeMode}
             modelLabel={modelConfig!.model}
             contextPercent={contextPercent}
             approxTokens={approxTokens}

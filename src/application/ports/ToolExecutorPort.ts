@@ -13,6 +13,12 @@ export interface ToolProgressEvent {
   message: string
   /** 子步骤失败并不代表整个工具失败 —— 批次里挂一个，其余照跑。 */
   ok?: boolean
+  /** Structured task progress is rendered in the persistent task dock, not the transcript. */
+  task?: {
+    id: string
+    title: string
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'clear'
+  }
 }
 
 export interface ToolExecutionRequest {

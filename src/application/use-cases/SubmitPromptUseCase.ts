@@ -10,6 +10,8 @@ import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import type { LoggerPort } from '../ports/LoggerPort'
 import type { SessionRepositoryPort } from '../ports/SessionRepositoryPort'
 import type { WorkspaceContextPort } from '../ports/WorkspaceContextPort'
+import type { ToolProgressEvent } from '../ports/ToolExecutorPort'
+import type { AssistantMode } from '../../domain/assistant/value-objects/AssistantMode'
 import { createSessionTitle } from '../support/createSessionTitle'
 
 export interface SubmitPromptCommand {
@@ -36,8 +38,13 @@ export interface StreamingCallbacks {
   onUserMessage?: (session: ConversationSession) => void
   onChunk: (delta: string) => void
   onTranscript?: (content: string) => void
+  /** Promotes text emitted before a tool to a stable assistant segment. */
+  onAssistantSegment?: (content: string) => void
+  onTaskProgress?: (progress: NonNullable<ToolProgressEvent['task']>) => void
+  onRetry?: (retry: { attempt: number; maxRetries: number; delayMs: number; reason: string }) => void
   onApproval?: (approval: PendingToolApproval) => void
   onWorkflowPhase?: (phase: 'plan' | 'execute') => void
+  onAssistantMode?: (mode: AssistantMode) => void
   onDone: (fullContent: string) => void
   onError: (error: Error) => void
 }
@@ -151,12 +158,26 @@ export class SubmitPromptUseCase {
       transcript?: string
       approval?: PendingToolApproval
       workflowPhase?: 'plan' | 'execute'
+      assistantMode?: AssistantMode
+      taskProgress?: ToolProgressEvent['task']
+      retry?: { attempt: number; maxRetries: number; delayMs: number; reason: string }
     }>,
     callbacks: StreamingCallbacks,
     abortSignal?: AbortSignal,
   ): Promise<SubmitPromptResult> {
     const chunks: string[] = []
+    let segmentChunks: string[] = []
     let pendingApproval: PendingToolApproval | null = null
+
+    const commitAssistantSegment = (interrupted = false) => {
+      const content = segmentChunks.join('')
+      segmentChunks = []
+      if (!content) return
+
+      const persistedContent = interrupted ? `${content}\n\n[Response interrupted]` : content
+      session.addAssistantMessage(this.idGenerator.next(), this.clock.now(), persistedContent)
+      callbacks.onAssistantSegment?.(persistedContent)
+    }
 
     try {
       for await (const chunk of stream) {
@@ -164,7 +185,21 @@ export class SubmitPromptUseCase {
           callbacks.onWorkflowPhase?.(chunk.workflowPhase)
         }
 
+        if (chunk.assistantMode) {
+          callbacks.onAssistantMode?.(chunk.assistantMode)
+        }
+
+        if (chunk.taskProgress) {
+          callbacks.onTaskProgress?.(chunk.taskProgress)
+        }
+
+        if (chunk.retry) {
+          callbacks.onRetry?.(chunk.retry)
+        }
+
         if (chunk.transcript) {
+          // Text before a tool belongs before that tool in both the live UI and persisted history.
+          commitAssistantSegment()
           session.addSystemMessage(this.idGenerator.next(), this.clock.now(), chunk.transcript)
           callbacks.onTranscript?.(chunk.transcript)
         }
@@ -176,6 +211,7 @@ export class SubmitPromptUseCase {
 
         if (chunk.delta) {
           chunks.push(chunk.delta)
+          segmentChunks.push(chunk.delta)
           callbacks.onChunk(chunk.delta)
         }
       }
@@ -191,7 +227,7 @@ export class SubmitPromptUseCase {
         }
       }
 
-      session.addAssistantMessage(this.idGenerator.next(), this.clock.now(), fullContent)
+      commitAssistantSegment()
       await this.sessionRepository.save(session)
 
       callbacks.onDone(fullContent)
@@ -208,13 +244,8 @@ export class SubmitPromptUseCase {
       const err = error instanceof Error ? error : new Error(String(error))
       callbacks.onError(err)
 
-      const partial = chunks.join('')
-      if (partial) {
-        session.addAssistantMessage(
-          this.idGenerator.next(),
-          this.clock.now(),
-          `${partial}\n\n[Response interrupted]`,
-        )
+      if (segmentChunks.length > 0) {
+        commitAssistantSegment(true)
         await this.sessionRepository.save(session)
       }
 

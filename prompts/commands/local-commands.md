@@ -9,6 +9,7 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :workspace
 - :status
 - :tools
+- :tool-focus
 - :doctor
 - :diff
 - :review
@@ -24,6 +25,8 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :language [zh-CN|en]
 - :animation [off|minimal|full]
 - :permissions [manual|workspace|auto|plan]
+- :runtime [show|reset]
+- :runtime set [key] [integer]
 - :session
 - :storage
 - :storage set [path]

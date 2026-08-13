@@ -45,6 +45,13 @@ export interface ModelRequest {
 
 export interface ModelStreamChunk {
   delta: string
+  /** A retry scheduled before any response content was emitted. */
+  retry?: {
+    attempt: number
+    maxRetries: number
+    delayMs: number
+    reason: string
+  }
   /** 原生工具调用。走文本解析回退路径时该字段始终为空。 */
   toolCall?: ModelToolCall
   finishReason?: 'stop' | 'length' | 'error'

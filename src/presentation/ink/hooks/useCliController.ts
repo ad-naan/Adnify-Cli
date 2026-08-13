@@ -6,6 +6,7 @@ import type { AdnifyCliRuntime } from '../../../application/dto/AdnifyCliRuntime
 import { MemoryStore } from '../../../infrastructure/storage/MemoryStore'
 import type { ConversationSession } from '../../../domain/session/aggregates/ConversationSession'
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
+import type { AssistantMode } from '../../../domain/assistant/value-objects/AssistantMode'
 import type { CommandSuggestionItem } from '../components/CommandSuggestionList'
 import type { ChoiceTabItem } from '../components/ChoiceTabs'
 import { useConfigInit } from './useConfigInit'
@@ -41,6 +42,8 @@ export interface CliControllerState {
   statusLine: string
   streamingText: string
   streamingMessages: ConversationMessage[]
+  activeMode: AssistantMode
+  activeTasks: ActiveTaskItem[]
   isBooting: boolean
   isBusy: boolean
   configInitPrompt: string
@@ -54,6 +57,13 @@ export interface CliControllerState {
   recentSessions: SessionListItem[]
   handleInput: (input: string, key: Key) => void
   handlePaste: (text: string) => void
+  clearInput: () => void
+}
+
+export interface ActiveTaskItem {
+  id: string
+  title: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 }
 
 const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
@@ -64,6 +74,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':workspace': 'command.desc.workspace',
   ':status': 'command.desc.status',
   ':tools': 'command.desc.tools',
+  ':tool-focus': 'command.desc.toolFocus',
   ':doctor': 'command.desc.doctor',
   ':diff': 'command.desc.diff',
   ':review': 'command.desc.review',
@@ -78,6 +89,8 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':language [zh-CN|en]': 'command.desc.language',
   ':animation [off|minimal|full]': 'command.desc.animation',
   ':permissions [manual|workspace|auto|plan]': 'command.desc.permissions',
+  ':runtime [show|reset]': 'command.desc.runtime',
+  ':runtime set [key] [integer]': 'command.desc.runtime',
   ':session': 'command.desc.session',
   ':sessions': 'command.desc.sessions',
   ':resume [index|id]': 'command.desc.resume',
@@ -124,6 +137,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const [statusLine, setStatusLine] = useState(i18n.t('status.initializing'))
   const [streamingText, setStreamingText] = useState('')
   const [streamingMessages, setStreamingMessages] = useState<ConversationMessage[]>([])
+  const [workflowMode, setWorkflowMode] = useState<AssistantMode | null>(null)
+  const [activeTasks, setActiveTasks] = useState<ActiveTaskItem[]>([])
   const [isBooting, setIsBooting] = useState(true)
   const [isBusy, setIsBusy] = useState(false)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0)
@@ -195,6 +210,25 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     streamingBufferRef.current = ''
     setStreamingText('')
     setStreamingMessages([])
+  }, [])
+
+  const commitStreamingSegment = useCallback((content: string) => {
+    if (streamingFlushTimerRef.current) {
+      clearTimeout(streamingFlushTimerRef.current)
+      streamingFlushTimerRef.current = null
+    }
+
+    streamingBufferRef.current = ''
+    setStreamingText('')
+    setStreamingMessages((previous) => [
+      ...previous,
+      new ConversationMessage({
+        id: `stream-assistant-${Date.now()}-${previous.length + 1}`,
+        role: 'assistant',
+        content,
+        createdAt: new Date(),
+      }),
+    ])
   }, [])
 
   useEffect(() => {
@@ -521,6 +555,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       }
 
       resetStreamingState()
+      setWorkflowMode(session.mode)
+      setActiveTasks([])
 
       // Render the submitted message before any repository read or API request begins.
       // The use case replaces this temporary clone with the persisted message and stable id.
@@ -544,6 +580,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           onDone: () => {
             flushStreamingBuffer()
           },
+          onAssistantSegment: commitStreamingSegment,
           onTranscript: (content) => {
             setStreamingMessages((previous) => [
               ...previous,
@@ -556,7 +593,35 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
             ])
           },
           onWorkflowPhase: (phase) => {
+            setWorkflowMode(phase === 'plan' ? 'plan' : session.mode === 'chat' ? 'chat' : 'agent')
             setStatusLine(i18n.t(`status.workflowPhase.${phase}`))
+          },
+          onAssistantMode: (mode) => {
+            setWorkflowMode(mode)
+          },
+          onTaskProgress: (progress) => {
+            if (progress.status === 'clear') {
+              setActiveTasks([])
+              return
+            }
+
+            const nextTask: ActiveTaskItem = {
+              id: progress.id,
+              title: progress.title,
+              status: progress.status,
+            }
+            setActiveTasks((previous) => {
+              const existingIndex = previous.findIndex((task) => task.id === progress.id)
+              if (existingIndex < 0) return [...previous, nextTask]
+              return previous.map((task, index) => index === existingIndex ? nextTask : task)
+            })
+          },
+          onRetry: (retry) => {
+            setStatusLine(i18n.t('status.modelRetrying', {
+              attempt: retry.attempt,
+              max: retry.maxRetries,
+              delay: retry.delayMs,
+            }))
           },
           onError: (error) => {
             flushStreamingBuffer()
@@ -571,6 +636,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
 
       setSession(result.session)
       resetStreamingState()
+      setWorkflowMode(result.session.mode)
+      setActiveTasks([])
       setStatusLine(result.statusLine)
       await refreshRecentSessions(bootstrap.workspace.rootPath)
     } catch (error) {
@@ -581,6 +648,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         setStatusLine(i18n.t('status.executionFailed', { message }))
       }
       resetStreamingState()
+      setWorkflowMode(session.mode)
+      setActiveTasks([])
     } finally {
       activeAbortControllerRef.current = null
       busyRef.current = false
@@ -917,6 +986,13 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     setIsSuggestionDismissed(false)
   }, [assistantModePicker.isActive, inputCursor, inputValue, toolApproval.isActive, userInteraction.isActive])
 
+  const clearInput = useCallback(() => {
+    setInputValue('')
+    setInputCursor(0)
+    setHistoryIndex(null)
+    setIsSuggestionDismissed(false)
+  }, [])
+
   return {
     bootstrap,
     session,
@@ -925,6 +1001,8 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     statusLine,
     streamingText,
     streamingMessages,
+    activeMode: workflowMode ?? session?.mode ?? 'agent',
+    activeTasks,
     isBooting,
     isBusy,
     configInitPrompt: assistantModePicker.isActive
@@ -968,5 +1046,6 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     recentSessions,
     handleInput,
     handlePaste,
+    clearInput,
   }
 }

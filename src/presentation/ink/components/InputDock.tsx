@@ -25,6 +25,7 @@ export interface InputDockProps {
   i18n: AppI18n
   choiceItems?: ChoiceTabItem[]
   selectedChoiceIndex?: number
+  toolBrowseActive?: boolean
 }
 
 /** 提示块的两种语气：配置向导偏中性，工具审批偏警示。 */
@@ -54,8 +55,6 @@ function PromptBlock(props: PromptBlockProps) {
     <Box
       flexDirection="column"
       marginTop={1}
-      borderStyle="round"
-      borderColor={props.tone === 'approval' ? adnifyTheme.borderWarm : adnifyTheme.borderMuted}
       paddingX={1}
     >
       {props.lines.map((line, index) => (
@@ -102,8 +101,8 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
           <NativeInputLine
             value={props.value}
             cursor={props.cursor}
-            placeholder={props.i18n.t('input.placeholder')}
-            active={!props.busy && !isApprovalActive && !isInteractionActive}
+            placeholder={props.toolBrowseActive ? props.i18n.t('input.toolBrowsePlaceholder') : props.i18n.t('input.placeholder')}
+            active={!props.toolBrowseActive && !props.busy && !isApprovalActive && !isInteractionActive}
           />
           {props.busy ? (
             <ActivityPulse
@@ -132,6 +131,8 @@ export const InputDock = memo(function InputDock(props: InputDockProps) {
         <Text color={adnifyTheme.warm}>{props.i18n.t('input.hintChoiceTabs')}</Text>
       ) : isConfigActive ? (
         <Text color={adnifyTheme.textDim}>{hasChoices ? props.i18n.t('input.hintChoiceTabs') : props.i18n.t('input.hintConfigInit')}</Text>
+      ) : props.toolBrowseActive ? (
+        <Text color={adnifyTheme.brandSoft}>{props.i18n.t('input.hintToolBrowse')}</Text>
       ) : null}
     </Box>
   )

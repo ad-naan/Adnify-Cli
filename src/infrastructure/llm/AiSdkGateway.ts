@@ -20,6 +20,8 @@ import type {
 import type { LoggerPort } from '../../application/ports/LoggerPort'
 import type { ModelConfig, ModelProvider } from '../../domain/assistant/value-objects/ModelConfig'
 import { ResponseCache } from '../cache/ResponseCache'
+import type { RuntimeBudgetPort } from '../../application/ports/RuntimeBudgetPort'
+import { MutableRuntimeBudget } from '../runtime/MutableRuntimeBudget'
 
 /**
  * 缓存的完整响应。
@@ -75,6 +77,7 @@ export class AiSdkGateway implements ModelGatewayPort {
     private config: ModelConfig,
     private readonly logger: LoggerPort,
     createModel: (config: ModelConfig) => LanguageModel = createLanguageModel,
+    private readonly runtimeBudget: RuntimeBudgetPort = new MutableRuntimeBudget(),
   ) {
     this.createModel = createModel
     this.model = this.createModel(config)
@@ -121,7 +124,7 @@ export class AiSdkGateway implements ModelGatewayPort {
     const useNativeTools = wantsTools && !this.nativeToolsUnsupported.has(this.capabilityKey())
 
     try {
-      yield* this.streamOnce(request, cacheKey, useNativeTools)
+      yield* this.streamWithRetries(request, cacheKey, useNativeTools)
     } catch (error) {
       // provider 不认 tools 参数：记下来，改用纯文本重跑一次。
       // 调用方看到 usedNativeTools 为 false，会自己启用 XML 文本解析回退。
@@ -131,7 +134,7 @@ export class AiSdkGateway implements ModelGatewayPort {
           provider: this.config.provider,
           model: request.model,
         })
-        yield* this.streamOnce(request, cacheKey, false)
+        yield* this.streamWithRetries(request, cacheKey, false)
         return
       }
 
@@ -142,6 +145,43 @@ export class AiSdkGateway implements ModelGatewayPort {
   /** provider 能力按 provider+baseUrl+model 记录 —— 同一个 provider 换个端点结论可能完全不同。 */
   private capabilityKey(): string {
     return `${this.config.provider}::${this.config.baseUrl}::${this.config.model}`
+  }
+
+  private async *streamWithRetries(
+    request: ModelRequest,
+    cacheKey: string,
+    useNativeTools: boolean,
+  ): AsyncIterable<ModelStreamChunk> {
+    const { maxModelRetries, retryBaseDelayMs } = this.runtimeBudget.get()
+    for (let attempt = 0; attempt <= maxModelRetries; attempt += 1) {
+      let emittedContent = false
+      try {
+        for await (const chunk of this.streamOnce(request, cacheKey, useNativeTools)) {
+          if (chunk.delta || chunk.toolCall) emittedContent = true
+          yield chunk
+        }
+        return
+      } catch (error) {
+        if (emittedContent || attempt >= maxModelRetries || !isRetryableModelError(error)) {
+          throw error
+        }
+
+        const retryAttempt = attempt + 1
+        const delayMs = retryBaseDelayMs * 2 ** attempt
+        const reason = error instanceof Error ? error.message : String(error)
+        this.logger.warn('Retrying model request', {
+          attempt: retryAttempt,
+          maxRetries: maxModelRetries,
+          delayMs,
+          reason,
+        })
+        yield {
+          delta: '',
+          retry: { attempt: retryAttempt, maxRetries: maxModelRetries, delayMs, reason },
+        }
+        await abortableDelay(delayMs, request.abortSignal)
+      }
+    }
   }
 
   private async *streamOnce(
@@ -161,9 +201,19 @@ export class AiSdkGateway implements ModelGatewayPort {
     const toolCalls: ModelToolCall[] = []
 
     try {
+      const system = request.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n') || undefined
+      const messages = request.messages.filter((message) => message.role !== 'system')
       const result = streamText({
         model: this.model,
-        messages: request.messages.map(toAiModelMessage),
+        system,
+        messages: messages.map(toAiModelMessage),
+        allowSystemInMessages: false,
+        maxRetries: 0,
+        // The gateway owns retries and status reporting; SDK's default handler writes into Ink.
+        onError: () => {},
         temperature: request.temperature ?? this.config.temperature,
         maxOutputTokens: request.maxTokens ?? this.config.maxTokens,
         abortSignal: controller.signal,
@@ -225,6 +275,23 @@ export class AiSdkGateway implements ModelGatewayPort {
       request.abortSignal?.removeEventListener('abort', forwardAbort)
     }
   }
+}
+
+function isRetryableModelError(error: unknown): boolean {
+  return APICallError.isInstance(error) && error.isRetryable === true
+}
+
+async function abortableDelay(delayMs: number, abortSignal?: AbortSignal): Promise<void> {
+  if (abortSignal?.aborted) throw new Error('Request aborted')
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new Error('Request aborted'))
+    }
+    abortSignal?.addEventListener('abort', onAbort, { once: true })
+    setTimeout(() => abortSignal?.removeEventListener('abort', onAbort), delayMs)
+  })
 }
 
 function toAiModelMessage(message: import('../../application/ports/ModelGatewayPort').ModelMessage): AiModelMessage {

@@ -78,7 +78,7 @@ export const HeaderBar = memo(function HeaderBar(props: HeaderBarProps) {
             </>
           ) : null}
         </Box>
-        {showControls ? <Text color={adnifyTheme.textDim}>PgUp/PgDn · Ctrl+O</Text> : null}
+        {showControls ? <Text color={adnifyTheme.textDim}>{props.i18n.t('conversation.hintControls')}</Text> : null}
       </Box>
     </Box>
   )

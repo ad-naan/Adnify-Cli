@@ -40,6 +40,15 @@ import { isAssistantMode } from '../../domain/assistant/value-objects/AssistantM
 import type { AnimationLevel, PermissionMode as RuntimePermissionMode } from '../../application/dto/UiPreferences'
 import { SUPPORTED_APP_LOCALES, type AppLocale } from '../../application/i18n/AppI18n'
 import { handlePlanDocument } from './handlers/planDocumentHandler'
+import {
+  RUNTIME_BUDGET_LIMITS,
+  formatRuntimeBudget,
+  normalizeRuntimeBudget,
+  type RuntimeBudget,
+  type RuntimeBudgetPatch,
+  type RuntimeBudgetPort,
+} from '../../application/ports/RuntimeBudgetPort'
+import { MutableRuntimeBudget } from '../runtime/MutableRuntimeBudget'
 
 /**
  * 工具调度入口。
@@ -51,21 +60,6 @@ import { handlePlanDocument } from './handlers/planDocumentHandler'
  * 每次执行都有超时保护，防止卡死 agent 循环。计时只在真正干活时流逝，
  * 等用户审批的那段不算 —— 详见 ToolExecutionDeadline。
  */
-const TOOL_EXECUTION_TIMEOUT_MS = 30_000
-
-/**
- * task 的预算单独放大。
- *
- * 一次批次要串起若干次完整的模型往返，而单次请求本身已经被 gateway 的
- * `config.timeoutMs`（默认 60s）各自兜住了，批次不会无限悬着。
- * 沿用 30s 的话，任何真实的子代理派发都会在第一个子任务答完之前就被杀掉。
- */
-const TASK_EXECUTION_TIMEOUT_MS = 10 * 60_000
-
-function resolveTimeoutMs(toolId: string): number {
-  return toolId === 'task' ? TASK_EXECUTION_TIMEOUT_MS : TOOL_EXECUTION_TIMEOUT_MS
-}
-
 /** file-ops 中会改动磁盘的动作 —— 只有这些需要事前快照。 */
 const MUTATING_FILE_OPS = new Set(['write', 'update', 'patch'])
 
@@ -85,10 +79,14 @@ export class LocalToolExecutor implements ToolExecutorPort {
     private readonly resolvePermissionMode: () => PermissionMode = () => 'manual',
     private readonly userInteraction?: UserInteractionPort,
     private readonly runtimeControl?: RuntimeControlPort,
+    private readonly runtimeBudget: RuntimeBudgetPort = new MutableRuntimeBudget(),
   ) {}
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
-    const deadline = new ToolExecutionDeadline(resolveTimeoutMs(request.toolId))
+    const budget = this.runtimeBudget.get()
+    const deadline = new ToolExecutionDeadline(
+      request.toolId === 'task' ? budget.taskTimeoutMs : budget.toolTimeoutMs,
+    )
 
     try {
       return await Promise.race([
@@ -264,7 +262,11 @@ export class LocalToolExecutor implements ToolExecutorPort {
       )
     }
 
-    const parsed = parseTaskRequest(request)
+    const budget = this.runtimeBudget.get()
+    const parsed = parseTaskRequest(request, {
+      maxTasks: budget.maxSubTasksPerBatch,
+      maxConcurrency: budget.maxSubAgentConcurrency,
+    })
     if (!parsed.ok) {
       return parsed.result
     }
@@ -298,6 +300,7 @@ export class LocalToolExecutor implements ToolExecutorPort {
       value?: unknown
       provider?: unknown
       model?: unknown
+      budget?: unknown
       rationale?: unknown
     }
     try {
@@ -317,6 +320,7 @@ export class LocalToolExecutor implements ToolExecutorPort {
         content: [
           `assistantMode=${request.session?.mode ?? 'unknown'}`,
           `permissionMode=${this.runtimeControl.getPermissionMode()}`,
+          formatRuntimeBudget(this.runtimeControl.getRuntimeBudget?.() ?? this.runtimeBudget.get()),
           this.runtimeControl.inspect(),
         ].join('\n'),
       }
@@ -421,6 +425,30 @@ export class LocalToolExecutor implements ToolExecutorPort {
       return { toolId: request.toolId, ok: true, content: `Animation level saved as ${value}.` }
     }
 
+    if (action === 'set-runtime-budget') {
+      const parsedBudget = parseRuntimeBudgetPatch(input.budget)
+      if (!parsedBudget.ok) return toolFailure(request.toolId, parsedBudget.message)
+      const current = this.runtimeControl.getRuntimeBudget?.() ?? this.runtimeBudget.get()
+      const proposed = normalizeRuntimeBudget({ ...current, ...parsedBudget.patch })
+      const denial = await this.ensureApproved({
+        toolId: request.toolId,
+        riskLevel: 'careful',
+        summary: 'apply AI-proposed execution budget for this CLI session',
+        scope: 'protected',
+        kind: 'orchestration',
+        mutates: false,
+        preview: [rationale || 'The assistant requested more suitable limits for the current task.', '', formatRuntimeBudget(proposed)].join('\n'),
+      }, deadline)
+      if (denial) return denial
+      const updated = this.runtimeControl.setRuntimeBudget?.(parsedBudget.patch)
+        ?? this.runtimeBudget.update(parsedBudget.patch)
+      return {
+        toolId: request.toolId,
+        ok: true,
+        content: `Session execution budget updated:\n${formatRuntimeBudget(updated)}`,
+      }
+    }
+
     if (action === 'switch-model') {
       const provider = typeof input.provider === 'string' ? input.provider.trim() : ''
       const model = typeof input.model === 'string' ? input.model.trim() : undefined
@@ -489,6 +517,30 @@ export class LocalToolExecutor implements ToolExecutorPort {
 
 function toRelativePath(rootPath: string, resolvedPath: string): string {
   return relative(rootPath, resolvedPath) || '.'
+}
+
+function parseRuntimeBudgetPatch(value: unknown):
+  | { ok: true; patch: RuntimeBudgetPatch }
+  | { ok: false; message: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, message: 'set-runtime-budget requires a non-empty budget object.' }
+  }
+  const patch: RuntimeBudgetPatch = {}
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = rawKey as keyof RuntimeBudget
+    if (!(key in RUNTIME_BUDGET_LIMITS)) {
+      return { ok: false, message: `Unknown runtime budget field: ${rawKey}.` }
+    }
+    const [min, max] = RUNTIME_BUDGET_LIMITS[key]
+    if (typeof rawValue !== 'number' || !Number.isInteger(rawValue) || rawValue < min || rawValue > max) {
+      return { ok: false, message: `${rawKey} must be an integer from ${min} to ${max}.` }
+    }
+    patch[key] = rawValue
+  }
+  if (Object.keys(patch).length === 0) {
+    return { ok: false, message: 'set-runtime-budget requires at least one budget field.' }
+  }
+  return { ok: true, patch }
 }
 
 function classifyWorkspaceTarget(targetPath: string): 'workspace' | 'protected' {

@@ -246,7 +246,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
     properties: {
       action: {
         type: 'string',
-        enum: ['inspect', 'begin-execution', 'set-assistant-mode', 'set-permission-mode', 'set-language', 'set-animation', 'switch-model'],
+        enum: ['inspect', 'begin-execution', 'set-assistant-mode', 'set-permission-mode', 'set-language', 'set-animation', 'switch-model', 'set-runtime-budget'],
       },
       value: {
         type: 'string',
@@ -254,6 +254,21 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       provider: { type: 'string', description: 'Configured provider name for switch-model.' },
       model: { type: 'string', description: 'Optional model name for switch-model.' },
+      budget: {
+        type: 'object',
+        description: 'Session-only execution limits proposed by the assistant. Include only fields that need changing; host approval is always required.',
+        properties: {
+          maxStepsPerTurn: { type: 'integer', minimum: 4, maximum: 100 },
+          maxModelRetries: { type: 'integer', minimum: 0, maximum: 8 },
+          retryBaseDelayMs: { type: 'integer', minimum: 100, maximum: 10000 },
+          duplicateToolCallLimit: { type: 'integer', minimum: 1, maximum: 10 },
+          maxSubAgentConcurrency: { type: 'integer', minimum: 1, maximum: 12 },
+          maxSubTasksPerBatch: { type: 'integer', minimum: 1, maximum: 24 },
+          toolTimeoutMs: { type: 'integer', minimum: 5000, maximum: 600000 },
+          taskTimeoutMs: { type: 'integer', minimum: 30000, maximum: 3600000 },
+        },
+        additionalProperties: false,
+      },
       rationale: { type: 'string', description: 'Short user-facing reason for the change.' },
     },
     required: ['action', 'rationale'],

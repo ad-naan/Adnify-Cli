@@ -85,6 +85,26 @@ function request(overrides: Partial<ModelRequest> = {}): ModelRequest {
 }
 
 describe('AiSdkGateway native tools', () => {
+  test('passes system instructions separately from conversation messages', async () => {
+    const model = new MockLanguageModelV3({
+      doStream: async () => streamOf({ text: 'ok' }) as never,
+    })
+    const gateway = new AiSdkGateway(CONFIG, createLogger(), () => model as unknown as LanguageModel)
+
+    await collect(gateway.streamChat(request({
+      messages: [
+        { role: 'system', content: 'trusted host instructions' },
+        { role: 'user', content: 'hello' },
+      ],
+      tools: [],
+    })))
+
+    const prompt = model.doStreamCalls[0]?.prompt ?? []
+    expect(prompt[0]?.role).toBe('system')
+    expect(prompt[0]?.content).toContain('trusted host instructions')
+    expect(prompt.filter((message) => message.role === 'system')).toHaveLength(1)
+  })
+
   test('surfaces a native tool call as a structured chunk', async () => {
     const model = new MockLanguageModelV3({
       doStream: async () =>
@@ -158,6 +178,34 @@ describe('AiSdkGateway native tools', () => {
 
     // 空数组也不能传 —— 部分端点看到 tools 字段就走另一条代码路径。
     expect(model.doStreamCalls[0]?.tools ?? []).toHaveLength(0)
+  })
+})
+
+describe('AiSdkGateway visible retries', () => {
+  test('emits two retry updates and succeeds on the third total attempt', async () => {
+    let providerCalls = 0
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        providerCalls += 1
+        if (providerCalls < 3) {
+          throw new APICallError({
+            message: 'temporarily unavailable',
+            url: 'https://example.com/v1/chat/completions',
+            requestBodyValues: {},
+            statusCode: 503,
+            isRetryable: true,
+          })
+        }
+        return streamOf({ text: 'recovered' }) as never
+      },
+    })
+    const gateway = new AiSdkGateway(CONFIG, createLogger(), () => model as unknown as LanguageModel)
+
+    const chunks = await collect(gateway.streamChat(request({ tools: [] })))
+
+    expect(providerCalls).toBe(3)
+    expect(chunks.filter((chunk) => chunk.retry).map((chunk) => chunk.retry?.attempt)).toEqual([1, 2])
+    expect(chunks.map((chunk) => chunk.delta).join('')).toContain('recovered')
   })
 })
 

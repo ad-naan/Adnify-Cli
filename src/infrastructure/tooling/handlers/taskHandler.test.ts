@@ -78,6 +78,19 @@ describe('parseTaskRequest', () => {
     expect(parsed.tasks[0]?.priority).toBeUndefined()
   })
 
+  test('uses runtime task and concurrency limits', () => {
+    const request = createRequest(JSON.stringify({
+      tasks: [{ title: 'a', instruction: 'b' }, { title: 'c', instruction: 'd' }],
+      maxConcurrency: 9,
+    }))
+    const parsed = parseTaskRequest(request, { maxTasks: 2, maxConcurrency: 7 })
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) expect(parsed.value.maxConcurrency).toBe(7)
+
+    const rejected = parseTaskRequest(request, { maxTasks: 1, maxConcurrency: 7 })
+    expect(rejected.ok).toBe(false)
+  })
+
   test('accepts specialized sub-agent roles', () => {
     const parsed = parseOrThrow(
       JSON.stringify({ tasks: [{ title: 'review', instruction: 'audit it', role: 'review' }] }),

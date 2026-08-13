@@ -12,6 +12,7 @@ import type {
 } from '../../domain/tooling/value-objects/ToolApproval'
 import { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { RuntimeControlPort } from '../../application/ports/RuntimeControlPort'
+import { MutableRuntimeBudget } from '../runtime/MutableRuntimeBudget'
 
 /** 检查点用例不关心日志输出。 */
 const silentLogger = {
@@ -59,6 +60,36 @@ function createRuntimeApprovalSpy(decision: ToolApprovalDecision) {
 }
 
 describe('LocalToolExecutor', () => {
+  test('requires approval before applying an AI-proposed session budget', async () => {
+    const approval = createRuntimeApprovalSpy('approved')
+    const budget = new MutableRuntimeBudget()
+    const runtimeControl: RuntimeControlPort = {
+      inspect: () => '{}',
+      getPermissionMode: () => 'workspace',
+      setPermissionMode: async () => {},
+      setAnimationLevel: async () => {},
+      setLocale: async () => {},
+      switchModel: () => null,
+      getRuntimeBudget: () => budget.get(),
+      setRuntimeBudget: (patch) => budget.update(patch),
+    }
+    const executor = new LocalToolExecutor(
+      approval.port, undefined, undefined, undefined, () => 'workspace', undefined, runtimeControl, budget,
+    )
+
+    const result = await executor.execute({
+      toolId: 'runtime-control',
+      input: '{"action":"set-runtime-budget","budget":{"maxStepsPerTurn":40,"maxModelRetries":4},"rationale":"complex migration"}',
+      workspace: createWorkspace(),
+    })
+
+    expect(result.ok).toBe(true)
+    expect(budget.get().maxStepsPerTurn).toBe(40)
+    expect(budget.get().maxModelRetries).toBe(4)
+    expect(approval.asked).toHaveLength(1)
+    expect(approval.asked[0]?.scope).toBe('protected')
+  })
+
   test('lets AI apply low-risk runtime preferences without approval', async () => {
     const approval = createRuntimeApprovalSpy('denied')
     let animation = 'full'

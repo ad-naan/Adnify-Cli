@@ -4,10 +4,7 @@ import type { ToolExecutionRequest, ToolExecutionResult } from '../../../applica
 import { parseJsonObject } from '../toolPathGuard'
 import { toolFailure, toolSuccess } from './ToolHandler'
 
-/** 一次最多派几个子任务。上限存在的意义是防止模型一口气开出几十个并发请求。 */
-const MAX_TASKS = 8
 const DEFAULT_CONCURRENCY = 3
-const MAX_CONCURRENCY = 4
 
 /** 单个子任务结果的回填上限 —— 8 个子任务的完整输出足以吃掉整个上下文窗口。 */
 const MAX_RESULT_CHARS = 2000
@@ -42,7 +39,10 @@ function parseRole(value: unknown): SubAgentRole | undefined {
  * 与其他 handler 一样，解析和执行分开 —— LocalToolExecutor 需要先拿到解析结果
  * 才能判断审批时该给用户看什么。
  */
-export function parseTaskRequest(request: ToolExecutionRequest): ParseTaskResult {
+export function parseTaskRequest(
+  request: ToolExecutionRequest,
+  limits: { maxTasks: number; maxConcurrency: number } = { maxTasks: 8, maxConcurrency: 4 },
+): ParseTaskResult {
   const prompt = parseJsonObject(request.input)
   const rawTasks = prompt.tasks
 
@@ -53,12 +53,12 @@ export function parseTaskRequest(request: ToolExecutionRequest): ParseTaskResult
     }
   }
 
-  if (rawTasks.length > MAX_TASKS) {
+  if (rawTasks.length > limits.maxTasks) {
     return {
       ok: false,
       result: toolFailure(
         request.toolId,
-        `Too many subtasks: ${rawTasks.length}. At most ${MAX_TASKS} may be dispatched at once.`,
+        `Too many subtasks: ${rawTasks.length}. At most ${limits.maxTasks} may be dispatched at once.`,
       ),
     }
   }
@@ -109,8 +109,8 @@ export function parseTaskRequest(request: ToolExecutionRequest): ParseTaskResult
   const rawConcurrency = prompt.maxConcurrency
   const maxConcurrency =
     typeof rawConcurrency === 'number' && Number.isFinite(rawConcurrency)
-      ? Math.max(1, Math.min(MAX_CONCURRENCY, Math.trunc(rawConcurrency)))
-      : DEFAULT_CONCURRENCY
+      ? Math.max(1, Math.min(limits.maxConcurrency, Math.trunc(rawConcurrency)))
+      : Math.min(DEFAULT_CONCURRENCY, limits.maxConcurrency)
 
   return { ok: true, value: { tasks, maxConcurrency } }
 }
@@ -176,6 +176,14 @@ export async function runTaskBatch(
   const total = created.length
   let done = 0
 
+  for (const task of created) {
+    request.onProgress?.({
+      toolId: request.toolId,
+      message: `queued: ${task.title}`,
+      task: { id: task.id, title: task.title, status: 'pending' },
+    })
+  }
+
   const finished = await orchestrator.runBatch(created, {
     maxConcurrency: parsed.maxConcurrency,
     workspace: request.workspace,
@@ -186,6 +194,7 @@ export async function runTaskBatch(
       request.onProgress?.({
         toolId: request.toolId,
         message: `▸ started: ${title}`,
+        task: { id: _taskId, title, status: 'running' },
       })
     },
     onTaskComplete: (taskId, success) => {
@@ -195,8 +204,15 @@ export async function runTaskBatch(
         toolId: request.toolId,
         ok: success,
         message: `${success ? '✓' : '✗'} ${title} (${done}/${total})`,
+        task: { id: taskId, title, status: success ? 'completed' : 'failed' },
       })
     },
+  })
+
+  request.onProgress?.({
+    toolId: request.toolId,
+    message: 'task batch complete',
+    task: { id: request.toolId, title: '', status: 'clear' },
   })
 
   // 全军覆没时报失败，模型才知道要换个方式，而不是把一堆空结果当成答案往下走。

@@ -13,6 +13,7 @@ import {
 import { readStorageSettingsFile, writeStorageSettingsFile } from './storageSettingsFile'
 import type { AnimationLevel, PermissionMode } from '../../application/dto/UiPreferences'
 import type { AppLocale } from '../../application/i18n/AppI18n'
+import type { RuntimeBudgetPatch } from '../../application/ports/RuntimeBudgetPort'
 
 const CONFIG_FILE = 'config.json'
 const SESSIONS_DIR = 'sessions'
@@ -92,6 +93,12 @@ export class FileStorageSettingsAdapter implements StorageSettingsPort {
     const storage = await resolveAppStorage(this.options)
     const settings = await readStorageSettingsFile(storage.settingsPath)
     await writeStorageSettingsFile(storage.settingsPath, { ...settings, permissionMode })
+  }
+
+  async setRuntimeBudget(runtimeBudget: RuntimeBudgetPatch): Promise<void> {
+    const storage = await resolveAppStorage(this.options)
+    const settings = await readStorageSettingsFile(storage.settingsPath)
+    await writeStorageSettingsFile(storage.settingsPath, { ...settings, runtimeBudget })
   }
 }
 

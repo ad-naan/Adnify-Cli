@@ -40,6 +40,8 @@ import { readStorageSettingsFile } from '../storage/storageSettingsFile'
 import { TsLanguageServiceIndexer } from '../indexing/TsLanguageServiceIndexer'
 import { GraphRepoMapBuilder } from '../indexing/GraphRepoMapBuilder'
 import { PendingUserInteractionAdapter } from '../tooling/PendingUserInteractionAdapter'
+import { MutableRuntimeBudget } from '../runtime/MutableRuntimeBudget'
+import type { RuntimeBudgetPort } from '../../application/ports/RuntimeBudgetPort'
 
 export type { AdnifyCliRuntime }
 
@@ -63,6 +65,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const toolApproval = new PendingToolApprovalAdapter(ui.permissionMode)
   const userInteraction = new PendingUserInteractionAdapter()
   const hookRegistry = new DefaultHookRegistry(logger)
+  const runtimeBudget = new MutableRuntimeBudget(startupSettings.runtimeBudget)
 
   const skillRepository = new FsSkillRepository({
     workspaceRoot: process.cwd(),
@@ -127,6 +130,9 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
           undefined,
           undefined,
           () => 'workspace',
+          undefined,
+          undefined,
+          runtimeBudget,
         ),
       })
     },
@@ -160,7 +166,10 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
         await storageSettings.setLocale(locale)
       },
       switchModel: (provider, model) => switchModelForRuntime(provider, model),
+      getRuntimeBudget: () => runtimeBudget.get(),
+      setRuntimeBudget: (patch) => runtimeBudget.update(patch),
     },
+    runtimeBudget,
   )
 
   // Code indexer + repo map builder (shared singletons, reused across model switches)
@@ -177,6 +186,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     repoMapBuilder,
     codeIndexer,
     hookRegistry,
+    runtimeBudget,
   })
   let currentResponder = initialStack.responder
   let currentGateway = initialStack.gateway
@@ -227,6 +237,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
       repoMapBuilder,
       codeIndexer,
       hookRegistry,
+      runtimeBudget,
     })
     currentResponder = newStack.responder
     currentGateway = newStack.gateway
@@ -268,6 +279,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
         clock,
         logger,
         i18n,
+        runtimeBudget,
       ),
     },
     switchModel,
@@ -292,6 +304,7 @@ interface ResponderStackConfig {
   repoMapBuilder?: GraphRepoMapBuilder
   codeIndexer?: TsLanguageServiceIndexer
   hookRegistry?: DefaultHookRegistry
+  runtimeBudget: RuntimeBudgetPort
 }
 
 function createResponderStack(cfg: ResponderStackConfig) {
@@ -305,6 +318,7 @@ function createResponderStack(cfg: ResponderStackConfig) {
     repoMapBuilder,
     codeIndexer,
     hookRegistry,
+    runtimeBudget,
   } = cfg
 
   if (!modelConfig.apiKey) {
@@ -318,7 +332,7 @@ function createResponderStack(cfg: ResponderStackConfig) {
     baseUrl: modelConfig.baseUrl,
   })
 
-  const gateway = new AiSdkGateway(modelConfig, logger)
+  const gateway = new AiSdkGateway(modelConfig, logger, undefined, runtimeBudget)
   const compactor = new ModelContextCompactor(
     gateway,
     resolveContextWindowTokens(modelConfig),
@@ -338,6 +352,7 @@ function createResponderStack(cfg: ResponderStackConfig) {
     repoMapBuilder,
     codeIndexer,
     hookRegistry,
+    runtimeBudget,
   )
   return { responder, gateway }
 }

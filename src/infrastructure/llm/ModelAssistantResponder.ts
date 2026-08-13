@@ -23,18 +23,19 @@ import { StreamingToolCallParser } from '../../application/support/StreamingTool
 import { toModelToolDefinitions } from '../tooling/toolInputSchemas'
 import { ToolProgressChannel } from './ToolProgressChannel'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
+import type { AssistantMode } from '../../domain/assistant/value-objects/AssistantMode'
 import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
 import type { HookPort } from '../../application/ports/HookPort'
 import { loadProjectInstructions } from '../prompt/loadProjectInstructions'
 import { classifyShellCommand } from '../tooling/classifyShellCommand'
+import type { RuntimeBudgetPort } from '../../application/ports/RuntimeBudgetPort'
+import { MutableRuntimeBudget } from '../runtime/MutableRuntimeBudget'
 
 type WorkflowPhase = 'plan' | 'execute'
 
 export class ModelAssistantResponder implements AssistantResponderPort {
-  private readonly maxAgentTurns = 20
-
   /**
    * 该 gateway 是否真的走通了原生 function calling。
    * null 表示还没观察到 —— 此时按最保守的方式处理：仍然注入 XML 协议散文。
@@ -55,6 +56,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
     private readonly repoMapBuilder?: RepoMapBuilderPort,
     private readonly codeIndexer?: CodeIndexerPort,
     private readonly hooks?: HookPort,
+    private readonly runtimeBudget: RuntimeBudgetPort = new MutableRuntimeBudget(),
   ) {}
 
   updateGateway(gateway: ModelGatewayPort, config: ModelConfig): void {
@@ -101,8 +103,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       let verificationNudgeSent = false
       let workflowPhase: WorkflowPhase = command.session.mode === 'plan' ? 'plan' : 'execute'
       let compactionAttempted = false
+      let lastToolSignature = ''
+      let consecutiveIdenticalCalls = 0
 
-      for (let turn = 0; turn < this.maxAgentTurns; turn += 1) {
+      for (let turn = 0; turn < this.runtimeBudget.get().maxStepsPerTurn; turn += 1) {
         // Auto-compaction: if context is approaching the token limit, compress
         const contextWindowTokens = resolveContextWindowTokens(this.config)
         if (!compactionAttempted && this.compactor && this.compactor.needsCompaction(activeMessages, contextWindowTokens)) {
@@ -163,6 +167,10 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           abortSignal: command.abortSignal,
           tools: toModelToolDefinitions(command.toolCatalog),
         })) {
+          if (chunk.retry) {
+            yield { kind: 'retry', delta: '', retry: chunk.retry, done: false }
+            continue
+          }
           if (chunk.usedNativeTools !== undefined) {
             this.nativeToolsSupported = chunk.usedNativeTools
           }
@@ -277,6 +285,29 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           continue
         }
 
+        const toolSignature = `${toolCall.name}\u0000${toolCall.input.trim()}`
+        consecutiveIdenticalCalls = toolSignature === lastToolSignature
+          ? consecutiveIdenticalCalls + 1
+          : 1
+        lastToolSignature = toolSignature
+        if (consecutiveIdenticalCalls > this.runtimeBudget.get().duplicateToolCallLimit) {
+          const message = this.i18n.t('transcript.repeatedToolStopped', {
+            tool: toolCall.name,
+            count: this.runtimeBudget.get().duplicateToolCallLimit,
+          })
+          yield {
+            kind: 'transcript',
+            delta: '',
+            transcript: createCliNoticeContent(message, {
+              title: this.i18n.locale === 'en' ? 'Repeated tool loop stopped' : '已停止重复工具循环',
+              tone: 'warning',
+            }),
+            done: false,
+          }
+          yield { kind: 'text', delta: message, done: true }
+          return
+        }
+
         yield {
           kind: 'transcript',
           delta: '',
@@ -284,7 +315,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
             [
               this.i18n.t('transcript.executingTool', {
                 turn: turn + 1,
-                maxTurns: this.maxAgentTurns,
+                maxTurns: this.runtimeBudget.get().maxStepsPerTurn,
               }),
               `tool: ${toolCall.name}`,
               `input: ${this.truncateForTranscript(toolCall.input, 400)}`,
@@ -353,6 +384,15 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           )
 
           for await (const progress of channel.drain()) {
+            if (progress.task) {
+              yield {
+                kind: 'task',
+                delta: '',
+                taskProgress: progress.task,
+                done: false,
+              }
+              continue
+            }
             yield {
               kind: 'transcript',
               delta: '',
@@ -369,6 +409,9 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
         const resumedExecution = toolResult.ok && isBeginExecutionCall(toolCall.name, toolCall.input)
         if (resumedExecution) workflowPhase = 'execute'
+        const controlledAssistantMode = toolResult.ok
+          ? resolveControlledAssistantMode(toolCall.name, toolCall.input, command.session.mode)
+          : undefined
 
         if (toolResult.ok && isMutatingFileCall(toolCall.name, toolCall.input) && canRunVerification) {
           verificationRequired = true
@@ -410,6 +453,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           kind: 'transcript',
           delta: '',
           workflowPhase: resumedExecution ? 'execute' : undefined,
+          assistantMode: controlledAssistantMode,
           transcript: createCliCommandOutputContent(
             [
               toolResult.ok
@@ -467,7 +511,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
 
       yield {
         kind: 'text',
-        delta: this.i18n.t('transcript.turnLimit'),
+        delta: this.i18n.t('transcript.turnLimit', { count: this.runtimeBudget.get().maxStepsPerTurn }),
         done: true,
       }
     } catch (error) {
@@ -621,7 +665,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       '',
       '## Agent Discipline',
       '- Use tools proactively: read the code before editing, search before guessing, verify after changes.',
-      '- You can chain up to 20 tool calls in a single task turn — use them generously.',
+      '- Use the minimum number of tool calls needed. Never repeat the same tool with identical input unless new evidence makes the repeat necessary.',
       '- Risky actions pause for user approval: file-ops write/update/patch, verification commands, git mutations. If denied, do not retry — explain and propose alternatives.',
       '- After the tool result is returned, continue the task normally.',
       '- Prefer search-index for text search, glob-search for file discovery, file-ops for reading/editing, shell-runner for running checks.',
@@ -740,6 +784,20 @@ function isBeginExecutionCall(toolName: string, input: string): boolean {
     return (JSON.parse(input) as { action?: unknown }).action === 'begin-execution'
   } catch {
     return false
+  }
+}
+
+function resolveControlledAssistantMode(
+  toolName: string,
+  input: string,
+  currentMode: AssistantMode,
+): AssistantMode | undefined {
+  if (toolName !== 'runtime-control') return undefined
+  try {
+    const action = (JSON.parse(input) as { action?: unknown }).action
+    return action === 'set-assistant-mode' || action === 'begin-execution' ? currentMode : undefined
+  } catch {
+    return undefined
   }
 }
 

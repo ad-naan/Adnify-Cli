@@ -42,6 +42,7 @@ export const StatusDock = memo(function StatusDock(props: StatusDockProps) {
     props.isBusy ||
     !props.isConfigured ||
     /(?:error|fail|abort|denied|错误|失败|中止|拒绝|配置)/i.test(props.statusLine)
+  const normalizedStatusLine = props.statusLine.replace(/\s+/g, ' ').trim()
 
   return (
     <Box width="100%" justifyContent="space-between" paddingX={1}>
@@ -51,7 +52,7 @@ export const StatusDock = memo(function StatusDock(props: StatusDockProps) {
         </Text>
         <Text color={adnifyTheme.textMuted} wrap="truncate-end">
           {showStatusMessage
-            ? props.statusLine
+            ? normalizedStatusLine
             : `${props.workspaceName} · ${props.isGitRepository ? 'git' : 'no-git'}${columns >= 96 ? ' · ↑↓ history · PgUp/PgDn scroll' : ''}`}
         </Text>
       </Box>

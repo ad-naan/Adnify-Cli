@@ -944,6 +944,42 @@ describe('ModelAssistantResponder native tool calls', () => {
     expect(resultAt).toBeGreaterThan(completedAt)
   })
 
+  test('stops identical tool calls after the configured duplicate limit', async () => {
+    let executed = 0
+    const gateway: ModelGatewayPort = {
+      async *streamChat(): AsyncIterable<ModelStreamChunk> {
+        yield {
+          delta: '',
+          toolCall: {
+            toolCallId: `repeat-${executed}`,
+            toolName: 'shell-runner',
+            input: '{"argv":["git","status"]}',
+          },
+          usedNativeTools: true,
+        }
+      },
+    }
+    const toolExecutor: ToolExecutorPort = {
+      async execute(request) {
+        executed += 1
+        return { toolId: request.toolId, ok: true, content: 'clean' }
+      },
+    }
+
+    const visible: string[] = []
+    for await (const chunk of createResponder(gateway, toolExecutor).streamReply({
+      prompt: 'inspect repeatedly',
+      session: createSession('repeat-loop'),
+      workspace: createWorkspace(),
+      toolCatalog: CATALOG,
+    })) {
+      visible.push(chunk.delta)
+    }
+
+    expect(executed).toBe(2)
+    expect(visible.join('')).toContain('exceeded 2 consecutive calls')
+  })
+
   test('lets the model plan read-only, then resume execution for a complex task', async () => {
     let invocation = 0
     const executed: string[] = []

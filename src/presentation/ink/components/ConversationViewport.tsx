@@ -25,6 +25,10 @@ export interface ConversationViewportProps {
   animateStreamingIndicator?: boolean
   /** 普通会话压缩工具噪音；全屏记录模式展开完整审计细节。 */
   expandedDetails?: boolean
+  /** Tool transcript rows expanded individually in the normal conversation. */
+  expandedToolMessageIds?: readonly string[]
+  /** Keyboard-focused tool row. */
+  selectedToolMessageId?: string
   /** Full transcript mode keeps the title and controls; normal mode stays visually quiet. */
   showChrome?: boolean
   i18n: AppI18n
@@ -53,7 +57,18 @@ interface StreamingHeaderViewportRow {
   label: string
 }
 
-type ViewportRow = TextViewportRow | SpacerViewportRow | StreamingHeaderViewportRow
+interface ToolHeaderViewportRow {
+  kind: 'tool-header'
+  key: string
+  glyph: string
+  label: string
+  meta?: string
+  color: string
+  messageId: string
+  selected: boolean
+}
+
+type ViewportRow = TextViewportRow | SpacerViewportRow | StreamingHeaderViewportRow | ToolHeaderViewportRow
 
 const PANEL_HORIZONTAL_CHROME = 4
 const MIN_CONTENT_WIDTH = 24
@@ -71,6 +86,69 @@ function resolveToneColor(tone: CliTranscriptTone): string {
     default:
       return adnifyTheme.borderActive
   }
+}
+
+function toolGlyph(tone: CliTranscriptTone, isResult: boolean): string {
+  if (!isResult) return '›'
+  if (tone === 'success') return '✓'
+  if (tone === 'danger') return '✗'
+  if (tone === 'warning') return '!'
+  return '•'
+}
+
+function extractToolName(title: string | undefined, i18n: AppI18n): string | null {
+  const prefix = `${i18n.t('transcript.tools')} ·`
+  if (!title?.startsWith(prefix)) return null
+  return title.slice(prefix.length).trim() || null
+}
+
+export function collectToolMessageIds(
+  messages: readonly ConversationMessage[],
+  i18n: AppI18n,
+): string[] {
+  return messages
+    .filter((message) => {
+      const structured = parseCliTranscriptMarkup(message.content)
+      return Boolean(
+        structured &&
+        (structured.kind === 'notice' || structured.kind === 'command-output') &&
+        extractToolName(structured.title, i18n),
+      )
+    })
+    .map((message) => message.id)
+}
+
+function compactToolResult(
+  content: string,
+): { body: string; elapsed?: string; fallbackStatus?: string } {
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const fallbackStatus = lines.shift()?.trim()
+  const elapsedLine = lines[0]?.trim()
+  const elapsed = elapsedLine?.toLowerCase().startsWith('elapsed:')
+    ? elapsedLine.slice('elapsed:'.length).trim()
+    : undefined
+  if (elapsed) lines.shift()
+  while (lines[0]?.trim() === '') lines.shift()
+  return { body: lines.join('\n').trim(), elapsed, fallbackStatus }
+}
+
+function extractToolTurn(content: string): string | undefined {
+  const matched = /(?:\u7b2c\s*)?(\d+)\s*\/\s*(\d+)(?:\s*\u8f6e|\s*turn)?/i.exec(content)
+  return matched ? `${matched[1]}/${matched[2]}` : undefined
+}
+
+function toolCollapsedContent(
+  content: string,
+  i18n: AppI18n,
+  contentWidth: number,
+): string {
+  const collapsed = collapseBlock(content, 3, i18n, contentWidth)
+  if (!collapsed.isCollapsed) return collapsed.lines.join('\n')
+  const hint = i18n.t(
+    collapsed.hiddenLines === 1 ? 'collapse.toolHiddenOne' : 'collapse.toolHidden',
+    { count: collapsed.hiddenLines },
+  )
+  return [...collapsed.lines.slice(0, -1), hint].join('\n')
 }
 
 function wrapContent(content: string, maxWidth: number): string[] {
@@ -154,7 +232,8 @@ function appendMessageRows(
   message: ConversationMessage,
   i18n: AppI18n,
   contentWidth: number,
-  expandedDetails: boolean,
+  toolExpanded: boolean,
+  selectedToolMessageId?: string,
 ) {
   const structured = parseCliTranscriptMarkup(message.content)
 
@@ -172,8 +251,36 @@ function appendMessageRows(
         return
       case 'command-output': {
         const accentColor = resolveToneColor(structured.tone)
-        const isToolOutput = structured.title?.startsWith(`${i18n.t('transcript.tools')} ·`)
-        const content = isToolOutput && !expandedDetails
+        const toolName = extractToolName(structured.title, i18n)
+        const isToolOutput = Boolean(toolName)
+        if (toolName) {
+          const result = compactToolResult(structured.content)
+          const body = result.body || result.fallbackStatus || ''
+          rows.push({
+            kind: 'tool-header',
+            key: `${message.id}-tool-output-header`,
+            glyph: toolGlyph(structured.tone, true),
+            label: toolName,
+            meta: [
+              result.elapsed,
+              i18n.t(toolExpanded ? 'conversation.toolCollapseHint' : 'conversation.toolExpandHint'),
+            ].filter(Boolean).join(' · '),
+            color: accentColor,
+            messageId: message.id,
+            selected: selectedToolMessageId === message.id,
+          })
+          if (body) {
+            appendWrappedRows(rows, {
+              keyPrefix: `${message.id}-tool-output-body`,
+              content: toolExpanded ? body : toolCollapsedContent(body, i18n, contentWidth),
+              contentColor: structured.tone === 'danger' ? adnifyTheme.textSecondary : adnifyTheme.textMuted,
+              contentWidth,
+              indent: 2,
+            })
+          }
+          return
+        }
+        const content = isToolOutput && !toolExpanded
           ? collapseBlock(structured.content, 4, i18n, contentWidth).lines.join('\n')
           : structured.content
 
@@ -200,8 +307,34 @@ function appendMessageRows(
       }
       case 'notice': {
         const accentColor = resolveToneColor(structured.tone)
-        const isToolNotice = structured.title?.startsWith(`${i18n.t('transcript.tools')} ·`)
-        const content = isToolNotice && !expandedDetails
+        const toolName = extractToolName(structured.title, i18n)
+        const isToolNotice = Boolean(toolName)
+        if (toolName) {
+          rows.push({
+            kind: 'tool-header',
+            key: `${message.id}-tool-notice-header`,
+            glyph: toolGlyph(structured.tone, false),
+            label: toolName,
+            meta: [
+              extractToolTurn(structured.content),
+              i18n.t(toolExpanded ? 'conversation.toolCollapseHint' : 'conversation.toolExpandHint'),
+            ].filter(Boolean).join(' · '),
+            color: accentColor,
+            messageId: message.id,
+            selected: selectedToolMessageId === message.id,
+          })
+          if (toolExpanded) {
+            appendWrappedRows(rows, {
+              keyPrefix: `${message.id}-tool-notice-body`,
+              content: structured.content,
+              contentColor: adnifyTheme.textMuted,
+              contentWidth,
+              indent: 2,
+            })
+          }
+          return
+        }
+        const content = isToolNotice && !toolExpanded
           ? collapseBlock(structured.content, 3, i18n, contentWidth).lines.join('\n')
           : structured.content
 
@@ -291,11 +424,20 @@ function buildMessageRows(
   contentWidth: number,
   hasStreaming: boolean,
   expandedDetails: boolean,
+  expandedToolMessageIds: ReadonlySet<string>,
+  selectedToolMessageId?: string,
 ): ViewportRow[] {
   const rows: ViewportRow[] = []
 
   messages.forEach((message, index) => {
-    appendMessageRows(rows, message, i18n, contentWidth, expandedDetails)
+    appendMessageRows(
+      rows,
+      message,
+      i18n,
+      contentWidth,
+      expandedDetails || expandedToolMessageIds.has(message.id),
+      selectedToolMessageId,
+    )
 
     if (index < messages.length - 1 || hasStreaming) {
       rows.push({ kind: 'spacer', key: `${message.id}-spacer` })
@@ -348,6 +490,19 @@ function renderViewportRow(row: ViewportRow, animateStreamingIndicator: boolean)
           variant="dots"
         />
         <Text color={adnifyTheme.textDim}>{row.label}</Text>
+      </Box>
+    )
+  }
+
+  if (row.kind === 'tool-header') {
+    return (
+      <Box key={row.key} width="100%" gap={1}>
+        <Text color={row.selected ? adnifyTheme.brandStrong : adnifyTheme.textDim} bold={row.selected}>
+          {row.selected ? '›' : ' '}
+        </Text>
+        <Text color={row.color} bold>{row.glyph}</Text>
+        <Text color={adnifyTheme.textSecondary} bold>{row.label}</Text>
+        {row.meta ? <Text color={adnifyTheme.textDim}>{row.meta}</Text> : null}
       </Box>
     )
   }
@@ -433,14 +588,28 @@ export const ConversationViewport = memo(function ConversationViewport(
     [terminalColumns],
   )
   const messageRows = useMemo(
-    () => buildMessageRows(
-      props.messages,
-      props.i18n,
+    () => {
+      const expandedToolMessageIds = new Set(props.expandedToolMessageIds ?? [])
+      return buildMessageRows(
+        props.messages,
+        props.i18n,
+        contentWidth,
+        Boolean(props.streamingText || props.busy),
+        Boolean(props.expandedDetails),
+        expandedToolMessageIds,
+        props.selectedToolMessageId,
+      )
+    },
+    [
       contentWidth,
-      Boolean(props.streamingText || props.busy),
-      Boolean(props.expandedDetails),
-    ),
-    [contentWidth, props.busy, props.expandedDetails, props.i18n, props.messages, props.streamingText],
+      props.busy,
+      props.expandedDetails,
+      props.expandedToolMessageIds,
+      props.i18n,
+      props.messages,
+      props.selectedToolMessageId,
+      props.streamingText,
+    ],
   )
   const streamingRows = useMemo(
     () => buildStreamingRows(props.streamingText ?? '', props.i18n, contentWidth, Boolean(props.busy)),
@@ -463,6 +632,30 @@ export const ConversationViewport = memo(function ConversationViewport(
       return viewportRows
     }
 
+    if (props.selectedToolMessageId) {
+      const selectedIndex = viewportRows.findIndex(
+        (row) => row.kind === 'tool-header' && row.messageId === props.selectedToolMessageId,
+      )
+      if (selectedIndex >= 0) {
+        const bodyRows = conversationBodyRows(props.viewportRows)
+        const start = Math.max(
+          0,
+          Math.min(viewportRows.length - bodyRows, selectedIndex - Math.floor(bodyRows / 2)),
+        )
+        const body = viewportRows.slice(start, start + bodyRows)
+        const hiddenBelow = viewportRows.length - start - body.length
+        return [
+          {
+            kind: 'text',
+            key: 'viewport-tool-focus-indicator',
+            content: buildHiddenAboveLabel(start, hiddenBelow, contentWidth, props.i18n),
+            contentColor: adnifyTheme.textDim,
+          } satisfies TextViewportRow,
+          ...body,
+        ]
+      }
+    }
+
     // 顶部留一行给提示条，告诉用户上面还藏着多少内容 ——
     // 会话区没有终端原生 scrollback，不说清楚就等同于内容凭空消失。
     const bodyRows = conversationBodyRows(props.viewportRows)
@@ -478,7 +671,7 @@ export const ConversationViewport = memo(function ConversationViewport(
       } satisfies TextViewportRow,
       ...body,
     ]
-  }, [contentWidth, props.i18n, props.viewportRows, scrollOffset, viewportRows])
+  }, [contentWidth, props.i18n, props.selectedToolMessageId, props.viewportRows, scrollOffset, viewportRows])
   return (
     <Box width="100%" flexDirection="column" paddingX={1}>
       {props.showChrome ? (
