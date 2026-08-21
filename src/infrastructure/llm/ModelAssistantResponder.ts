@@ -384,6 +384,15 @@ export class ModelAssistantResponder implements AssistantResponderPort {
           )
 
           for await (const progress of channel.drain()) {
+            if (progress.todos) {
+              yield {
+                kind: 'todo',
+                delta: '',
+                todos: progress.todos,
+                done: false,
+              }
+              continue
+            }
             if (progress.task) {
               yield {
                 kind: 'task',
@@ -652,6 +661,7 @@ export class ModelAssistantResponder implements AssistantResponderPort {
         'For workflow-phase, use {"phase":"plan|execute","rationale":"short reason"}.',
         'For runtime-control, choose one supported action and explain the reason. Never handle API keys through this tool.',
         'For plan-document, use write/read/list; documents stay under .adnify/plans/.',
+        'For todo-write, send the full checklist: {"todos":[{"content":"...","status":"pending|in_progress|completed"}]}. Keep one item in_progress at a time.',
         '',
       )
     }
@@ -676,7 +686,8 @@ export class ModelAssistantResponder implements AssistantResponderPort {
       '- Use runtime-control when changing modes or settings would help the task. The host decides whether the change is automatic, asks the user, or is denied.',
       '- If the user requests a mutation while explicit session or permission plan mode is active, call runtime-control(begin-execution). Do not merely tell the user to type :mode or :permissions. One host approval resumes execution.',
       '- Plan mode may write planning artifacts only through plan-document. Store them under .adnify/plans/; source files remain read-only until execution is approved.',
-      '- Available executable tools: workspace-read, search-index, glob-search, file-ops, shell-runner, web-search, web-fetch, ask-user, workflow-phase, runtime-control, plan-document.',
+      '- For tasks with three or more steps (or when the user gives a list), call todo-write to track progress: keep exactly one item in_progress, mark it completed the moment it is done, and always resend the full list.',
+      '- Available executable tools: workspace-read, search-index, glob-search, file-ops, shell-runner, web-search, web-fetch, ask-user, workflow-phase, runtime-control, plan-document, todo-write.',
     )
 
     return promptParts.join('\n')

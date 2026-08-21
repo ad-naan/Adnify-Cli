@@ -26,6 +26,7 @@ import { InputDock } from './components/InputDock'
 import { Panel } from './components/Panel'
 import { StatusDock } from './components/StatusDock'
 import { TaskDock } from './components/TaskDock'
+import { TodoDock } from './components/TodoDock'
 import { useCliController } from './hooks/useCliController'
 import { useViewportScroll } from './hooks/useViewportScroll'
 
@@ -335,6 +336,7 @@ export function App(props: AppProps) {
 
       {!isTranscriptView ? (
         <Box width="100%" flexDirection="column" flexShrink={0}>
+          <TodoDock todos={controller.todos} i18n={i18n} />
           <TaskDock tasks={controller.activeTasks} i18n={i18n} />
           <InputDock
             value={controller.inputValue}

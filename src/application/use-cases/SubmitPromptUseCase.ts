@@ -10,7 +10,7 @@ import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import type { LoggerPort } from '../ports/LoggerPort'
 import type { SessionRepositoryPort } from '../ports/SessionRepositoryPort'
 import type { WorkspaceContextPort } from '../ports/WorkspaceContextPort'
-import type { ToolProgressEvent } from '../ports/ToolExecutorPort'
+import type { ToolProgressEvent, ToolTodoItem } from '../ports/ToolExecutorPort'
 import type { AssistantMode } from '../../domain/assistant/value-objects/AssistantMode'
 import { createSessionTitle } from '../support/createSessionTitle'
 
@@ -41,6 +41,8 @@ export interface StreamingCallbacks {
   /** Promotes text emitted before a tool to a stable assistant segment. */
   onAssistantSegment?: (content: string) => void
   onTaskProgress?: (progress: NonNullable<ToolProgressEvent['task']>) => void
+  /** Full checklist snapshot from todo-write, rendered in the persistent todo dock. */
+  onTodoUpdate?: (todos: ToolTodoItem[]) => void
   onRetry?: (retry: { attempt: number; maxRetries: number; delayMs: number; reason: string }) => void
   onApproval?: (approval: PendingToolApproval) => void
   onWorkflowPhase?: (phase: 'plan' | 'execute') => void
@@ -160,6 +162,7 @@ export class SubmitPromptUseCase {
       workflowPhase?: 'plan' | 'execute'
       assistantMode?: AssistantMode
       taskProgress?: ToolProgressEvent['task']
+      todos?: ToolTodoItem[]
       retry?: { attempt: number; maxRetries: number; delayMs: number; reason: string }
     }>,
     callbacks: StreamingCallbacks,
@@ -191,6 +194,10 @@ export class SubmitPromptUseCase {
 
         if (chunk.taskProgress) {
           callbacks.onTaskProgress?.(chunk.taskProgress)
+        }
+
+        if (chunk.todos) {
+          callbacks.onTodoUpdate?.(chunk.todos)
         }
 
         if (chunk.retry) {

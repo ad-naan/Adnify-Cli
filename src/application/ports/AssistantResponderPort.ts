@@ -1,7 +1,7 @@
 import type { ConversationSession } from '../../domain/session/aggregates/ConversationSession'
 import type { ToolDescriptor } from '../../domain/tooling/entities/ToolDescriptor'
 import type { WorkspaceContext } from '../../domain/workspace/entities/WorkspaceContext'
-import type { ToolProgressEvent } from './ToolExecutorPort'
+import type { ToolProgressEvent, ToolTodoItem } from './ToolExecutorPort'
 import type { AssistantMode } from '../../domain/assistant/value-objects/AssistantMode'
 
 export interface AssistantReply {
@@ -17,13 +17,14 @@ export interface PendingToolApproval {
 }
 
 export interface AssistantStreamChunk {
-  kind?: 'text' | 'transcript' | 'approval' | 'task' | 'retry'
+  kind?: 'text' | 'transcript' | 'approval' | 'task' | 'todo' | 'retry'
   delta: string
   transcript?: string
   approval?: PendingToolApproval
   workflowPhase?: 'plan' | 'execute'
   assistantMode?: AssistantMode
   taskProgress?: ToolProgressEvent['task']
+  todos?: ToolTodoItem[]
   retry?: { attempt: number; maxRetries: number; delayMs: number; reason: string }
   done: boolean
 }

@@ -50,6 +50,7 @@ const messages = {
     'input.labelApprovalMode': 'approval',
     'input.hintApproval': '使用方向键选择，回车确认',
     'taskDock.title': '任务',
+    'todoDock.title': '待办',
 
     'status.system': 'system',
     'status.configured': '已配置',
@@ -478,6 +479,7 @@ const messages = {
     'input.labelApprovalMode': 'approval',
     'input.hintApproval': 'Use arrow keys and Enter to confirm',
     'taskDock.title': 'Tasks',
+    'todoDock.title': 'Todos',
 
     'status.system': 'system',
     'status.configured': 'configured',

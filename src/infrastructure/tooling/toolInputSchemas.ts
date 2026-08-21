@@ -284,6 +284,30 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
     required: ['action'],
     additionalProperties: false,
   },
+  'todo-write': {
+    type: 'object',
+    properties: {
+      todos: {
+        type: 'array',
+        description: 'The complete checklist (declarative overwrite). Always send every item, not just changed ones.',
+        items: {
+          type: 'object',
+          properties: {
+            content: { type: 'string', description: 'Imperative description of the step.' },
+            status: {
+              type: 'string',
+              enum: ['pending', 'in_progress', 'completed'],
+              description: 'Keep exactly one item in_progress at a time.',
+            },
+          },
+          required: ['content', 'status'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['todos'],
+    additionalProperties: false,
+  },
 }
 
 /** 没有登记 schema 的工具（例如未来新增的）退化成自由 JSON 对象，不至于直接不可用。 */
