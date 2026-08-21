@@ -810,4 +810,101 @@ describe('LocalToolExecutor approval gate', () => {
       expect(readBack.content).toContain('landed')
     })
   })
+
+  describe('write-after diagnostics', () => {
+    const passingDiagnostics = {
+      supportsFile: (p: string) => p.endsWith('.ts'),
+      getFileDiagnostics: async () => [],
+    }
+
+    test('appends diagnostics to a successful workspace write', async () => {
+      await withTempWorkspace(async (workspace) => {
+        const executor = new LocalToolExecutor(
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          {
+            supportsFile: (p: string) => p.endsWith('.ts'),
+            getFileDiagnostics: async () => [
+              { file: 'x.ts', line: 1, column: 7, severity: 'error' as const, code: 2322, message: "Type 'string' is not assignable to type 'number'." },
+            ],
+          },
+        )
+
+        const result = await executor.execute({
+          toolId: 'file-ops',
+          input: '{"action":"write","path":"x.ts","content":"const value: number = 1;\\n","allowWrite":true}',
+          workspace,
+        })
+
+        expect(result.ok).toBe(true)
+        expect(result.content).toContain('File written: x.ts')
+        expect(result.content).toContain('TypeScript reported')
+        expect(result.content).toContain('L1:7 error TS2322')
+      })
+    })
+
+    test('stays silent when diagnostics are clean', async () => {
+      await withTempWorkspace(async (workspace) => {
+        const executor = new LocalToolExecutor(
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          passingDiagnostics,
+        )
+
+        const result = await executor.execute({
+          toolId: 'file-ops',
+          input: '{"action":"write","path":"clean.ts","content":"export const x = 1;\\n","allowWrite":true}',
+          workspace,
+        })
+
+        expect(result.ok).toBe(true)
+        expect(result.content).not.toContain('TypeScript reported')
+      })
+    })
+
+    test('does not diagnose non-supported files', async () => {
+      await withTempWorkspace(async (workspace) => {
+        let called = false
+        const executor = new LocalToolExecutor(
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          {
+            supportsFile: (p: string) => p.endsWith('.ts'),
+            getFileDiagnostics: async () => {
+              called = true
+              return []
+            },
+          },
+        )
+
+        await executor.execute({
+          toolId: 'file-ops',
+          input: '{"action":"write","path":"notes.txt","content":"hi","allowWrite":true}',
+          workspace,
+        })
+
+        expect(called).toBe(false)
+      })
+    })
+
+    test('a diagnostics failure never breaks the write', async () => {
+      await withTempWorkspace(async (workspace) => {
+        const executor = new LocalToolExecutor(
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          {
+            supportsFile: (p: string) => p.endsWith('.ts'),
+            getFileDiagnostics: async () => {
+              throw new Error('diagnostics engine exploded')
+            },
+          },
+        )
+
+        const result = await executor.execute({
+          toolId: 'file-ops',
+          input: '{"action":"write","path":"y.ts","content":"export const y = 2;\\n","allowWrite":true}',
+          workspace,
+        })
+
+        expect(result.ok).toBe(true)
+        expect(result.content).toContain('File written: y.ts')
+      })
+    })
+  })
 })
