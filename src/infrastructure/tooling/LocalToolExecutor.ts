@@ -36,6 +36,7 @@ import type { PermissionMode } from '../../application/dto/UiPreferences'
 import type { UserInteractionPort } from '../../application/ports/UserInteractionPort'
 import { runAskUser } from './handlers/askUserHandler'
 import type { RuntimeControlPort } from '../../application/ports/RuntimeControlPort'
+import type { CodeDiagnostic, DiagnosticsPort } from '../../application/ports/DiagnosticsPort'
 import { isAssistantMode } from '../../domain/assistant/value-objects/AssistantMode'
 import type { AnimationLevel, PermissionMode as RuntimePermissionMode } from '../../application/dto/UiPreferences'
 import { SUPPORTED_APP_LOCALES, type AppLocale } from '../../application/i18n/AppI18n'
@@ -80,6 +81,12 @@ export class LocalToolExecutor implements ToolExecutorPort {
     private readonly userInteraction?: UserInteractionPort,
     private readonly runtimeControl?: RuntimeControlPort,
     private readonly runtimeBudget: RuntimeBudgetPort = new MutableRuntimeBudget(),
+    /**
+     * 写后诊断 provider（可选）。写入落盘且成功后，对被编辑文件做一次
+     * 语言服务诊断，把类型/语法错误当轮反馈给模型。诊断是纯建议性的：
+     * 未配置或失败都不影响写入结果。
+     */
+    private readonly diagnostics?: DiagnosticsPort,
   ) {}
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
@@ -217,6 +224,27 @@ export class LocalToolExecutor implements ToolExecutorPort {
     const result = await runFileOps(parsed.value)
     if (!result.ok && snapshotId) {
       this.checkpoints?.deleteSnapshot(snapshotId)
+    }
+
+    // 写后诊断：仅对工作区内、成功落盘的写入运行。诊断失败绝不改写 result。
+    if (
+      result.ok &&
+      parsed.value.scope === 'workspace' &&
+      MUTATING_FILE_OPS.has(action) &&
+      this.diagnostics?.supportsFile(resolvedPath)
+    ) {
+      try {
+        const found = await this.diagnostics.getFileDiagnostics(
+          request.workspace.rootPath,
+          resolvedPath,
+        )
+        const report = formatDiagnostics(found)
+        if (report) {
+          return { ...result, content: `${result.content}\n\n${report}` }
+        }
+      } catch {
+        // 诊断是建议性的，任何异常都保持原始写入结果不变。
+      }
     }
 
     return result
@@ -584,6 +612,35 @@ function permissionRank(mode: RuntimePermissionMode): number {
 
 function isAnimationLevel(value: string): value is AnimationLevel {
   return value === 'off' || value === 'minimal' || value === 'full'
+}
+
+/**
+ * 把写后诊断格式化为附加到工具结果的一段文本。
+ *
+ * 无诊断时返回 null（对干净的写入保持沉默，省 token）。有诊断时先给错误、
+ * 再给警告，并明确要求模型当轮处理 —— 这样模型无需再单独跑一遍 typecheck
+ * 就能看到自己刚引入的问题。
+ */
+function formatDiagnostics(diagnostics: CodeDiagnostic[]): string | null {
+  if (diagnostics.length === 0) {
+    return null
+  }
+
+  const errors = diagnostics.filter((d) => d.severity === 'error').length
+  const warnings = diagnostics.length - errors
+  const parts: string[] = []
+  if (errors > 0) parts.push(`${errors} error(s)`)
+  if (warnings > 0) parts.push(`${warnings} warning(s)`)
+
+  const lines = diagnostics.map(
+    (d) => `  L${d.line}:${d.column} ${d.severity} TS${d.code}: ${d.message.split('\n')[0]}`,
+  )
+
+  return [
+    `⚠ TypeScript reported ${parts.join(' and ')} in ${diagnostics[0].file} after this edit:`,
+    ...lines,
+    'Fix these before continuing, or explain why they are expected.',
+  ].join('\n')
 }
 
 /**

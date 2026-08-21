@@ -38,6 +38,7 @@ import { DefaultHookRegistry } from '../hooks/DefaultHookRegistry'
 import { resolveUiPreferences } from './resolveUiPreferences'
 import { readStorageSettingsFile } from '../storage/storageSettingsFile'
 import { TsLanguageServiceIndexer } from '../indexing/TsLanguageServiceIndexer'
+import { TsDiagnosticsProvider } from '../diagnostics/TsDiagnosticsProvider'
 import { GraphRepoMapBuilder } from '../indexing/GraphRepoMapBuilder'
 import { PendingUserInteractionAdapter } from '../tooling/PendingUserInteractionAdapter'
 import { MutableRuntimeBudget } from '../runtime/MutableRuntimeBudget'
@@ -107,6 +108,10 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const checkpointManager = new CheckpointManager(process.cwd(), logger)
   let switchModelForRuntime: (provider: string, model?: string) => { provider: string; model: string } | null = () => null
 
+  // Write-after diagnostics — feeds TypeScript type/syntax errors back to the model
+  // in the same turn a file is edited, without waiting for a separate typecheck pass.
+  const diagnosticsProvider = new TsDiagnosticsProvider(logger)
+
   // Recreate tool executor with MCP registry support
   //
   // 子代理编排器按需构造：executor 比 gateway 先建好，而 gateway 会随 `:model` 切换被替换，
@@ -170,6 +175,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
       setRuntimeBudget: (patch) => runtimeBudget.update(patch),
     },
     runtimeBudget,
+    diagnosticsProvider,
   )
 
   // Code indexer + repo map builder (shared singletons, reused across model switches)
