@@ -44,6 +44,7 @@ export interface CliControllerState {
   streamingMessages: ConversationMessage[]
   activeMode: AssistantMode
   activeTasks: ActiveTaskItem[]
+  todos: TodoItem[]
   isBooting: boolean
   isBusy: boolean
   configInitPrompt: string
@@ -64,6 +65,11 @@ export interface ActiveTaskItem {
   id: string
   title: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+}
+
+export interface TodoItem {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
 }
 
 const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
@@ -138,6 +144,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const [streamingMessages, setStreamingMessages] = useState<ConversationMessage[]>([])
   const [workflowMode, setWorkflowMode] = useState<AssistantMode | null>(null)
   const [activeTasks, setActiveTasks] = useState<ActiveTaskItem[]>([])
+  const [todos, setTodos] = useState<TodoItem[]>([])
   const [isBooting, setIsBooting] = useState(true)
   const [isBusy, setIsBusy] = useState(false)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0)
@@ -556,6 +563,9 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
       resetStreamingState()
       setWorkflowMode(session.mode)
       setActiveTasks([])
+      // 待办清单按「一次用户请求」为一个任务:开始新一轮就清空,循环期间由 todo-write 累积,
+      // 循环结束后保留最终状态直到下一轮。故意不在轮次结束时清空。
+      setTodos([])
 
       // Render the submitted message before any repository read or API request begins.
       // The use case replaces this temporary clone with the persisted message and stable id.
@@ -614,6 +624,10 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
               if (existingIndex < 0) return [...previous, nextTask]
               return previous.map((task, index) => index === existingIndex ? nextTask : task)
             })
+          },
+          onTodoUpdate: (nextTodos) => {
+            // 全量覆盖:todo-write 每次都带完整列表,直接替换。
+            setTodos(nextTodos.map((todo) => ({ content: todo.content, status: todo.status })))
           },
           onRetry: (retry) => {
             setStatusLine(i18n.t('status.modelRetrying', {
@@ -1002,6 +1016,7 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
     streamingMessages,
     activeMode: workflowMode ?? session?.mode ?? 'agent',
     activeTasks,
+    todos,
     isBooting,
     isBusy,
     configInitPrompt: assistantModePicker.isActive

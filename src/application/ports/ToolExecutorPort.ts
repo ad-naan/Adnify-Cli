@@ -7,6 +7,12 @@ import type { ConversationSession } from '../../domain/session/aggregates/Conver
  * 只有耗时长、内部又分多步的工具才会发（目前是 task 的子代理批次）。
  * 绝大多数工具跑得够快，从头到尾一个结果就够了。
  */
+/** 一条待办项。status 只有三态,和 TodoWrite 语义一致。 */
+export interface ToolTodoItem {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
 export interface ToolProgressEvent {
   toolId: string
   /** 给用户看的一行字，已经是成品文案，调用方直接上屏。 */
@@ -19,6 +25,11 @@ export interface ToolProgressEvent {
     title: string
     status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'clear'
   }
+  /**
+   * 完整的待办清单快照。todo-write 每次带上全量列表(声明式覆盖),
+   * 渲染在常驻待办 dock,而不是灌进 transcript。
+   */
+  todos?: ToolTodoItem[]
 }
 
 export interface ToolExecutionRequest {

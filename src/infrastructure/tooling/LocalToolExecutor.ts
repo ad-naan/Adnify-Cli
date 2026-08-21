@@ -41,6 +41,7 @@ import { isAssistantMode } from '../../domain/assistant/value-objects/AssistantM
 import type { AnimationLevel, PermissionMode as RuntimePermissionMode } from '../../application/dto/UiPreferences'
 import { SUPPORTED_APP_LOCALES, type AppLocale } from '../../application/i18n/AppI18n'
 import { handlePlanDocument } from './handlers/planDocumentHandler'
+import { handleTodoWrite } from './handlers/todoWriteHandler'
 import {
   RUNTIME_BUDGET_LIMITS,
   formatRuntimeBudget,
@@ -165,6 +166,8 @@ export class LocalToolExecutor implements ToolExecutorPort {
         return this.executeRuntimeControl(request, deadline)
       case 'plan-document':
         return handlePlanDocument(request)
+      case 'todo-write':
+        return handleTodoWrite(request)
       default:
         return toolFailure(request.toolId, `Tool "${request.toolId}" is not implemented yet.`)
     }
