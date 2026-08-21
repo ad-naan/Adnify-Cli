@@ -14,6 +14,7 @@ import type { AdnifyCliRuntime } from '../../application/dto/AdnifyCliRuntime'
 import { estimateTokens } from '../../domain/session/value-objects/CompactionResult'
 import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import { adnifyTheme } from './theme'
+import { sessionAccentColor } from './sessionAccent'
 import { ActivityPulse } from './components/ActivityPulse'
 import {
   ConversationViewport,
@@ -58,6 +59,10 @@ export function App(props: AppProps) {
     [controller.streamingMessages, session],
   )
   const showEmptyState = Boolean(session) && messages.length === 0 && !controller.streamingText
+  const sessionAccent = useMemo(
+    () => sessionAccentColor(session?.id ?? 'adnify', props.runtime.ui.theme),
+    [session?.id, props.runtime.ui.theme],
+  )
   const toolMessageIds = useMemo(() => collectToolMessageIds(messages, i18n), [i18n, messages])
   const [isTranscriptView, setIsTranscriptView] = useState(false)
   const [selectedToolMessageId, setSelectedToolMessageId] = useState<string | undefined>()
@@ -336,7 +341,7 @@ export function App(props: AppProps) {
 
       {!isTranscriptView ? (
         <Box width="100%" flexDirection="column" flexShrink={0}>
-          <TodoDock todos={controller.todos} i18n={i18n} />
+          <TodoDock todos={controller.todos} busy={controller.isBusy} i18n={i18n} />
           <TaskDock tasks={controller.activeTasks} i18n={i18n} />
           <InputDock
             value={controller.inputValue}
@@ -367,6 +372,7 @@ export function App(props: AppProps) {
             contextPercent={contextPercent}
             approxTokens={approxTokens}
             contextWindowTokens={contextWindowTokens}
+            accentColor={sessionAccent}
             i18n={i18n}
           />
         </Box>

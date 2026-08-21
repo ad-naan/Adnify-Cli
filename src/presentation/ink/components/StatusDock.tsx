@@ -15,6 +15,7 @@ export interface StatusDockProps {
   contextPercent: number
   approxTokens: number
   contextWindowTokens: number
+  accentColor: string
   i18n: AppI18n
 }
 
@@ -22,6 +23,22 @@ function formatTokenCount(tokens: number): string {
   if (tokens < 1_000) return String(tokens)
   if (tokens < 10_000) return `${(tokens / 1_000).toFixed(1)}k`
   return `${Math.round(tokens / 1_000)}k`
+}
+
+const GAUGE_WIDTH = 8
+
+/** A compact context-usage bar. The filled portion carries the session accent until usage runs hot. */
+function ContextGauge(props: { percent: number; fillColor: string; approxTokens: number; contextWindowTokens: number }) {
+  const ratio = Math.max(0, Math.min(1, props.percent / 100))
+  const filled = Math.min(GAUGE_WIDTH, Math.round(ratio * GAUGE_WIDTH))
+  return (
+    <Box>
+      <Text color={props.fillColor}>{'▰'.repeat(filled)}</Text>
+      <Text color={adnifyTheme.borderMuted}>{'▱'.repeat(GAUGE_WIDTH - filled)}</Text>
+      <Text color={props.fillColor}> {props.percent}%</Text>
+      <Text color={adnifyTheme.textDim}> {formatTokenCount(props.approxTokens)}/{formatTokenCount(props.contextWindowTokens)}</Text>
+    </Box>
+  )
 }
 
 export const StatusDock = memo(function StatusDock(props: StatusDockProps) {
@@ -37,7 +54,7 @@ export const StatusDock = memo(function StatusDock(props: StatusDockProps) {
       ? adnifyTheme.danger
       : props.contextPercent >= 75
         ? adnifyTheme.warm
-        : adnifyTheme.textMuted
+        : props.accentColor
   const showStatusMessage =
     props.isBusy ||
     !props.isConfigured ||
@@ -61,12 +78,16 @@ export const StatusDock = memo(function StatusDock(props: StatusDockProps) {
         {showSessionMeta ? (
           <>
             <Text color={adnifyTheme.borderMuted}>│</Text>
+            <Text color={props.accentColor}>●</Text>
             <Text color={adnifyTheme.textSecondary}>{props.mode}</Text>
             <Text color={adnifyTheme.textDim} wrap="truncate-end">{props.modelLabel}</Text>
             <Text color={adnifyTheme.borderMuted}>│</Text>
-            <Text color={contextColor}>
-              ctx {props.contextPercent}% · {formatTokenCount(props.approxTokens)}/{formatTokenCount(props.contextWindowTokens)}
-            </Text>
+            <ContextGauge
+              percent={props.contextPercent}
+              fillColor={contextColor}
+              approxTokens={props.approxTokens}
+              contextWindowTokens={props.contextWindowTokens}
+            />
           </>
         ) : null}
         {!showSessionMeta ? <Text color={readinessColor}>{readinessLabel}</Text> : null}

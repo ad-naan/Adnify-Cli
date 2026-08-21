@@ -16,10 +16,13 @@ function todoGlyph(status: TodoItem['status']): { glyph: string; color: string }
 }
 
 /** Live checklist surface. todo-write overwrites the whole list, so rows never accumulate. */
-export const TodoDock = memo(function TodoDock(props: { todos: TodoItem[]; i18n: AppI18n }) {
+export const TodoDock = memo(function TodoDock(props: { todos: TodoItem[]; busy?: boolean; i18n: AppI18n }) {
   if (props.todos.length === 0) return null
 
   const completed = props.todos.filter((todo) => todo.status === 'completed').length
+  const remaining = props.todos.length - completed
+  // When the turn is idle but work is still outstanding, nudge the user so the list isn't forgotten.
+  const showReminder = !props.busy && remaining > 0
   return (
     <Box width="100%" flexDirection="column" paddingX={1} marginBottom={1}>
       <Box gap={1}>
@@ -42,6 +45,14 @@ export const TodoDock = memo(function TodoDock(props: { todos: TodoItem[]; i18n:
           </Box>
         )
       })}
+      {showReminder ? (
+        <Box gap={1} paddingLeft={1}>
+          <Text color={adnifyTheme.warm}>⚠</Text>
+          <Text color={adnifyTheme.warm} wrap="truncate-end">
+            {props.i18n.t('todoDock.reminder', { count: remaining })}
+          </Text>
+        </Box>
+      ) : null}
     </Box>
   )
 })

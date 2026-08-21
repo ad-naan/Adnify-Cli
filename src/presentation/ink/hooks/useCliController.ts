@@ -4,6 +4,9 @@ import type { BootstrapSnapshot } from '../../../application/dto/BootstrapSnapsh
 import type { SessionListItem } from '../../../application/dto/SessionListItem'
 import type { AdnifyCliRuntime } from '../../../application/dto/AdnifyCliRuntime'
 import { MemoryStore } from '../../../infrastructure/storage/MemoryStore'
+import { resolveThemeMode } from '../../../infrastructure/bootstrap/resolveThemeMode'
+import { applyTheme } from '../theme'
+import { codePointLength, nextRevealStep, revealPrefix, REVEAL_FRAME_MS } from '../streamingReveal'
 import type { ConversationSession } from '../../../domain/session/aggregates/ConversationSession'
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import type { AssistantMode } from '../../../domain/assistant/value-objects/AssistantMode'
@@ -93,6 +96,7 @@ const COMMAND_DESCRIPTION_KEYS: Record<string, string> = {
   ':config clear api-key': 'command.desc.config',
   ':language [zh-CN|en]': 'command.desc.language',
   ':animation [off|minimal|full]': 'command.desc.animation',
+  ':theme [light|dark|system]': 'command.desc.theme',
   ':permissions [manual|workspace|auto|plan]': 'command.desc.permissions',
   ':runtime [show|reset]': 'command.desc.runtime',
   ':runtime set [key] [integer]': 'command.desc.runtime',
@@ -157,8 +161,9 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const activeAbortControllerRef = useRef<AbortController | null>(null)
   const bootKeyRef = useRef<string | null>(null)
   const draftInputRef = useRef('')
-  const streamingBufferRef = useRef('')
-  const streamingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const streamingTargetRef = useRef('')
+  const revealedRef = useRef(0)
+  const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const memoryStoreRef = useRef<MemoryStore | null>(null)
   const { stdout } = useStdout()
   const configInit = useConfigInit(i18n)
@@ -173,58 +178,66 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
   const permissionPicker = usePermissionPicker(i18n, params.runtime.toolApproval)
   const assistantModePicker = useAssistantModePicker(i18n, session?.mode ?? 'agent')
 
+  const smoothStreaming = params.runtime.ui.animationLevel === 'full'
+
+  const stopRevealTimer = useCallback(() => {
+    if (revealTimerRef.current) {
+      clearInterval(revealTimerRef.current)
+      revealTimerRef.current = null
+    }
+  }, [])
+
+  // Reveal the whole target immediately — used when smooth animation is off and at
+  // stream end, so no text is ever left un-shown.
   const flushStreamingBuffer = useCallback(() => {
-    if (streamingFlushTimerRef.current) {
-      clearTimeout(streamingFlushTimerRef.current)
-      streamingFlushTimerRef.current = null
-    }
+    stopRevealTimer()
+    const target = streamingTargetRef.current
+    if (!target) return
+    revealedRef.current = codePointLength(target)
+    setStreamingText(target)
+  }, [stopRevealTimer])
 
-    if (!streamingBufferRef.current) {
+  // Advance the reveal cursor one frame's worth of code points toward the target,
+  // turning bursty network arrivals into a steady on-screen flow. When smooth
+  // animation is off this still coalesces bursts to one render per frame, but
+  // reveals everything available instead of pacing it.
+  const revealTick = useCallback(() => {
+    const target = streamingTargetRef.current
+    const total = codePointLength(target)
+    if (revealedRef.current >= total) {
+      stopRevealTimer()
       return
     }
-
-    const nextChunk = streamingBufferRef.current
-    streamingBufferRef.current = ''
-    setStreamingText((previous) => previous + nextChunk)
-  }, [])
-
-  const queueStreamingChunk = useCallback((delta: string) => {
-    streamingBufferRef.current += delta
-
-    if (streamingFlushTimerRef.current) {
-      return
+    const step = smoothStreaming ? nextRevealStep(total - revealedRef.current) : total - revealedRef.current
+    revealedRef.current = Math.min(total, revealedRef.current + step)
+    setStreamingText(revealPrefix(target, revealedRef.current))
+    if (revealedRef.current >= total) {
+      stopRevealTimer()
     }
+  }, [smoothStreaming, stopRevealTimer])
 
-    streamingFlushTimerRef.current = setTimeout(() => {
-      streamingFlushTimerRef.current = null
-      if (!streamingBufferRef.current) {
-        return
+  const queueStreamingChunk = useCallback(
+    (delta: string) => {
+      streamingTargetRef.current += delta
+      if (!revealTimerRef.current) {
+        revealTimerRef.current = setInterval(revealTick, REVEAL_FRAME_MS)
       }
-
-      const nextChunk = streamingBufferRef.current
-      streamingBufferRef.current = ''
-      setStreamingText((previous) => previous + nextChunk)
-    }, 32)
-  }, [])
+    },
+    [revealTick],
+  )
 
   const resetStreamingState = useCallback(() => {
-    if (streamingFlushTimerRef.current) {
-      clearTimeout(streamingFlushTimerRef.current)
-      streamingFlushTimerRef.current = null
-    }
-
-    streamingBufferRef.current = ''
+    stopRevealTimer()
+    streamingTargetRef.current = ''
+    revealedRef.current = 0
     setStreamingText('')
     setStreamingMessages([])
-  }, [])
+  }, [stopRevealTimer])
 
   const commitStreamingSegment = useCallback((content: string) => {
-    if (streamingFlushTimerRef.current) {
-      clearTimeout(streamingFlushTimerRef.current)
-      streamingFlushTimerRef.current = null
-    }
-
-    streamingBufferRef.current = ''
+    stopRevealTimer()
+    streamingTargetRef.current = ''
+    revealedRef.current = 0
     setStreamingText('')
     setStreamingMessages((previous) => [
       ...previous,
@@ -235,15 +248,13 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
         createdAt: new Date(),
       }),
     ])
-  }, [])
+  }, [stopRevealTimer])
 
   useEffect(() => {
     return () => {
-      if (streamingFlushTimerRef.current) {
-        clearTimeout(streamingFlushTimerRef.current)
-      }
+      stopRevealTimer()
     }
-  }, [])
+  }, [stopRevealTimer])
 
   const refreshRecentSessions = useCallback(
     async (workspacePath: string) => {
@@ -530,6 +541,17 @@ export function useCliController(params: UseCliControllerParams): CliControllerS
           mcpServerList: params.runtime.mcpServerList ?? undefined,
           checkpointStore: params.runtime.checkpoints ?? undefined,
           permissionController: params.runtime.toolApproval,
+          themeController: {
+            apply: (appearance) => {
+              const mode = appearance === 'system'
+                ? resolveThemeMode(process.env, appearance)
+                : appearance
+              applyTheme(mode)
+              params.runtime.ui.themeAppearance = appearance
+              params.runtime.ui.theme = mode
+              return mode
+            },
+          },
           configUpdater: {
             applyModelConfig: (nextConfig) => {
               const activeConfig = params.runtime.applyModelConfig(nextConfig)

@@ -954,12 +954,15 @@ describe('ApplyCliCommandUseCase', () => {
     let savedLocale = ''
     let savedAnimation = ''
     let savedPermission = ''
+    let savedTheme = ''
+    let appliedTheme = ''
     let activePermission: 'manual' | 'workspace' | 'auto' | 'plan' = 'manual'
     const storageSettings: StorageSettingsPort = {
       ...createMockStorageSettings(),
       setLocale: async (locale) => { savedLocale = locale },
       setAnimationLevel: async (level) => { savedAnimation = level },
       setPermissionMode: async (mode) => { savedPermission = mode },
+      setThemeAppearance: async (theme) => { savedTheme = theme },
     }
     const useCase = new ApplyCliCommandUseCase(
       repo,
@@ -994,11 +997,24 @@ describe('ApplyCliCommandUseCase', () => {
       commandLine: ':animation full',
       bootstrap: createBootstrapSnapshot(),
     })
+    await useCase.execute({
+      sessionId: session.id,
+      commandLine: ':theme light',
+      bootstrap: createBootstrapSnapshot(),
+      themeController: {
+        apply: (appearance) => {
+          appliedTheme = appearance
+          return appearance === 'system' ? 'dark' : appearance
+        },
+      },
+    })
 
     expect(savedLocale).toBe('zh-CN')
     expect(savedAnimation).toBe('full')
     expect(savedPermission).toBe('auto')
     expect(activePermission).toBe('auto')
+    expect(savedTheme).toBe('light')
+    expect(appliedTheme).toBe('light')
   })
 
   test('should list available skills', async () => {

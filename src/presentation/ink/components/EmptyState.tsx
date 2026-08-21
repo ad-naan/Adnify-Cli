@@ -56,6 +56,15 @@ export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
   const gitLabel = props.i18n.t(
     props.isGitRepository ? 'header.meta.gitTracked' : 'header.meta.gitDetached',
   )
+  const tip = useMemo(() => {
+    const tips: string[] = []
+    for (let index = 1; ; index += 1) {
+      const value = props.i18n.maybeT(`empty.tip.${index}`)
+      if (!value) break
+      tips.push(value)
+    }
+    return tips.length > 0 ? tips[Math.floor(Math.random() * tips.length)] : null
+  }, [props.i18n])
 
   return (
     <Box width="100%" height="100%" justifyContent="center" alignItems="center" paddingX={1}>
@@ -118,6 +127,13 @@ export const EmptyState = memo(function EmptyState(props: EmptyStateProps) {
             ) : null}
           </Box>
         </Box>
+
+        {tip && !short ? (
+          <Box marginTop={1} gap={1}>
+            <Text color={adnifyTheme.warm}>💡 {props.i18n.t('empty.tipLabel')}</Text>
+            <Text color={adnifyTheme.textMuted} wrap="truncate-end">{tip}</Text>
+          </Box>
+        ) : null}
       </Box>
     </Box>
   )

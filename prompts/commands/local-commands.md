@@ -23,6 +23,7 @@ These commands are handled by the CLI itself instead of being sent to the model.
 - :config clear api-key
 - :language [zh-CN|en]
 - :animation [off|minimal|full]
+- :theme [light|dark|system]
 - :permissions [manual|workspace|auto|plan]
 - :runtime [show|reset]
 - :runtime set [key] [integer]

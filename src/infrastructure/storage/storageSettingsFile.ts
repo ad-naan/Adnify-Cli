@@ -7,6 +7,7 @@ export interface StorageSettingsFile {
   locale?: 'zh-CN' | 'en'
   animationLevel?: 'off' | 'minimal' | 'full'
   permissionMode?: 'manual' | 'workspace' | 'auto' | 'plan'
+  theme?: 'light' | 'dark' | 'system'
   runtimeBudget?: RuntimeBudgetPatch
 }
 

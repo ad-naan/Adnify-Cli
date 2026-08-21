@@ -55,6 +55,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
     process.env,
     startupSettings.animationLevel,
     startupSettings.permissionMode,
+    startupSettings.theme,
   )
   const config = new DefaultCliConfigAdapter()
   const storageSettings = new FileStorageSettingsAdapter()

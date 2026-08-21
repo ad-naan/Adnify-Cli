@@ -14,7 +14,7 @@ import type { ModelConfigStorePort } from '../ports/ModelConfigStorePort'
 import type { SessionRepositoryPort } from '../ports/SessionRepositoryPort'
 import type { StorageSettingsPort } from '../ports/StorageSettingsPort'
 import type { ToolApprovalController } from '../ports/ToolApprovalPort'
-import type { PermissionMode } from '../dto/UiPreferences'
+import type { PermissionMode, ThemeAppearance, ThemeMode } from '../dto/UiPreferences'
 import type { ModelConfig, ModelProvider } from '../../domain/assistant/value-objects/ModelConfig'
 import { resolveContextWindowTokens } from '../../domain/assistant/value-objects/ModelConfig'
 import { execFile } from 'node:child_process'
@@ -59,6 +59,11 @@ export interface ConfigUpdater {
   applyModelConfig: (config: ModelConfig) => ModelConfig
 }
 
+/** Applies a theme appearance live and returns the concrete palette it resolved to. */
+export interface ThemeApplier {
+  apply: (appearance: ThemeAppearance) => ThemeMode
+}
+
 export interface ApplyCliCommandCommand {
   sessionId: string
   commandLine: string
@@ -71,6 +76,7 @@ export interface ApplyCliCommandCommand {
   mcpServerList?: string[]
   checkpointStore?: CheckpointStoreLike
   permissionController?: ToolApprovalController
+  themeController?: ThemeApplier
 }
 
 export interface MemoryStoreLike {
@@ -755,6 +761,34 @@ export class ApplyCliCommandUseCase {
           title: this.i18n.t('transcript.config'),
           tone: 'success',
         })
+        return persist(message)
+      }
+
+      case 'theme': {
+        addCommandInput()
+        const requested = args[0]?.toLowerCase()
+        const appearances: ThemeAppearance[] = ['light', 'dark', 'system']
+
+        if (!requested) {
+          const message = this.i18n.t('cli.theme.usage')
+          addCommandOutput(message, { title: this.i18n.t('transcript.config'), tone: 'info' })
+          return persist(message)
+        }
+
+        if (!appearances.includes(requested as ThemeAppearance)) {
+          const message = this.i18n.t('cli.theme.invalid', { value: requested })
+          addCommandOutput(message, { title: this.i18n.t('transcript.config'), tone: 'warning' })
+          return persist(message)
+        }
+
+        const appearance = requested as ThemeAppearance
+        if (!this.storageSettings.setThemeAppearance || !command.themeController) {
+          throw new Error('Theme settings are unavailable in this runtime')
+        }
+        await this.storageSettings.setThemeAppearance(appearance)
+        const resolved = command.themeController.apply(appearance)
+        const message = this.i18n.t('cli.theme.saved', { value: appearance, resolved })
+        addCommandOutput(message, { title: this.i18n.t('transcript.config'), tone: 'success' })
         return persist(message)
       }
 

@@ -11,7 +11,7 @@ import {
   type ResolveAppStorageOptions,
 } from './resolveAppStorage'
 import { readStorageSettingsFile, writeStorageSettingsFile } from './storageSettingsFile'
-import type { AnimationLevel, PermissionMode } from '../../application/dto/UiPreferences'
+import type { AnimationLevel, PermissionMode, ThemeAppearance } from '../../application/dto/UiPreferences'
 import type { AppLocale } from '../../application/i18n/AppI18n'
 import type { RuntimeBudgetPatch } from '../../application/ports/RuntimeBudgetPort'
 
@@ -93,6 +93,12 @@ export class FileStorageSettingsAdapter implements StorageSettingsPort {
     const storage = await resolveAppStorage(this.options)
     const settings = await readStorageSettingsFile(storage.settingsPath)
     await writeStorageSettingsFile(storage.settingsPath, { ...settings, permissionMode })
+  }
+
+  async setThemeAppearance(theme: ThemeAppearance): Promise<void> {
+    const storage = await resolveAppStorage(this.options)
+    const settings = await readStorageSettingsFile(storage.settingsPath)
+    await writeStorageSettingsFile(storage.settingsPath, { ...settings, theme })
   }
 
   async setRuntimeBudget(runtimeBudget: RuntimeBudgetPatch): Promise<void> {
