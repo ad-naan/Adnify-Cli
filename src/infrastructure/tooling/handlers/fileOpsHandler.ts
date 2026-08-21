@@ -15,6 +15,11 @@ import {
   resolveFileToolPath,
 } from '../toolPathGuard'
 import { describeError, toolFailure, toolSuccess } from './ToolHandler'
+import {
+  findTolerantMatch,
+  reindentReplacement,
+  type TolerantStrategy,
+} from '../fuzzyMatch'
 
 /** 解析后的 file-ops 请求，避免每个动作重复解 JSON。 */
 export interface FileOpsRequest {
@@ -203,7 +208,36 @@ async function patchFileAction(input: FileOpsRequest): Promise<ToolExecutionResu
     const matchCount = countOccurrences(currentContent, oldText)
 
     if (matchCount === 0) {
-      return toolFailure(request.toolId, 'No matching content found for file-ops update.')
+      // 精确匹配 0 命中:对单点替换尝试空白容错定位(全量替换风险高,维持严格)。
+      const tolerant = replaceAll ? null : tryTolerantReplacement(currentContent, oldText, newText)
+
+      if (!tolerant) {
+        return toolFailure(request.toolId, 'No matching content found for file-ops update.')
+      }
+
+      if (tolerant.matchCount > 1) {
+        return toolFailure(
+          request.toolId,
+          `No exact match found; ${tolerant.matchCount} whitespace-tolerant matches are ambiguous. Add more surrounding context to "oldText" to pin a single location.`,
+        )
+      }
+
+      if (tolerant.content.length > MAX_FILE_WRITE_CHARS) {
+        return toolFailure(
+          request.toolId,
+          `Patched content is too large. Limit: ${MAX_FILE_WRITE_CHARS} characters.`,
+        )
+      }
+
+      await writeFile(resolvedPath, tolerant.content, 'utf8')
+
+      return toolSuccess(
+        request.toolId,
+        [
+          `File updated: ${toRelativePath(request, resolvedPath)}`,
+          `Replacements: 1 (matched via ${tolerant.strategy} tolerance; exact text not found)`,
+        ].join('\n'),
+      )
     }
 
     if (expectedCount !== undefined && matchCount !== expectedCount) {
@@ -244,6 +278,34 @@ function resolveExpectedCount(rawValue: unknown, replaceAll: boolean): number | 
   }
 
   return replaceAll ? undefined : 1
+}
+
+/**
+ * 精确匹配失败后的容错替换。找到唯一命中才产出新内容;命中多处只回报数量交由调用方
+ * 报歧义;无命中返回 null。缩进策略命中时对 newText 重排缩进,避免写回错误缩进。
+ */
+function tryTolerantReplacement(
+  content: string,
+  oldText: string,
+  newText: string,
+): { matchCount: number; strategy: TolerantStrategy; content: string } | null {
+  const result = findTolerantMatch(content, oldText)
+  if (!result.strategy || result.matches.length === 0) {
+    return null
+  }
+
+  if (result.matches.length > 1) {
+    return { matchCount: result.matches.length, strategy: result.strategy, content: '' }
+  }
+
+  const [match] = result.matches
+  const matchedText = content.slice(match.start, match.end)
+  const replacement =
+    result.strategy === 'indentation'
+      ? reindentReplacement(newText, oldText, matchedText)
+      : newText
+  const nextContent = content.slice(0, match.start) + replacement + content.slice(match.end)
+  return { matchCount: 1, strategy: result.strategy, content: nextContent }
 }
 
 function toRelativePath(request: ToolExecutionRequest, resolvedPath: string): string {
