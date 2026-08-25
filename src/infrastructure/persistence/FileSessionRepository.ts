@@ -1,7 +1,8 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SessionRepositoryPort } from '../../application/ports/SessionRepositoryPort'
 import type { AppStorageSnapshot } from '../../application/dto/AppStorageSnapshot'
+import { atomicWriteFile } from '../storage/atomicWriteFile'
 import {
   ConversationSession,
   type ConversationSessionSnapshot,
@@ -11,8 +12,10 @@ export class FileSessionRepository implements SessionRepositoryPort {
   constructor(private readonly storage: AppStorageSnapshot) {}
 
   async save(session: ConversationSession): Promise<void> {
-    await mkdir(this.storage.sessionsDir, { recursive: true })
-    await writeFile(this.resolveSessionPath(session.id), JSON.stringify(session.toSnapshot(), null, 2), 'utf8')
+    await atomicWriteFile(
+      this.resolveSessionPath(session.id),
+      JSON.stringify(session.toSnapshot(), null, 2),
+    )
   }
 
   async findById(sessionId: string): Promise<ConversationSession | null> {

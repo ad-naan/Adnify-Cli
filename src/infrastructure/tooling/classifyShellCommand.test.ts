@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { classifyShellCommand, formatShellCommandEffect } from './classifyShellCommand'
+import {
+  classifyShellCommand,
+  extendShellCommandAllowlist,
+  formatShellCommandEffect,
+} from './classifyShellCommand'
 
 describe('classifyShellCommand', () => {
   it('treats ripgrep as safe', () => {
@@ -49,6 +53,19 @@ describe('classifyShellCommand', () => {
   it('rejects unknown commands and empty argv', () => {
     expect(classifyShellCommand(['del', 'foo.txt']).ok).toBe(false)
     expect(classifyShellCommand([])).toEqual({ ok: false, reason: 'Missing command name.' })
+  })
+
+  it('allows user-allowlisted commands as careful (never safe)', () => {
+    extendShellCommandAllowlist(['Docker', ' docker-compose ', 42, ''])
+    expect(classifyShellCommand(['docker', 'ps'])).toMatchObject({ ok: true, riskLevel: 'careful' })
+    expect(classifyShellCommand(['docker-compose', 'up'])).toMatchObject({
+      ok: true,
+      riskLevel: 'careful',
+    })
+
+    // 白名单是整体替换语义：清空后未注册命令恢复拒绝。
+    extendShellCommandAllowlist([])
+    expect(classifyShellCommand(['docker', 'ps']).ok).toBe(false)
   })
 
   it('marks irreversible git and package installation as dangerous', () => {

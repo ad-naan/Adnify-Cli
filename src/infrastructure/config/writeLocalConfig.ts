@@ -1,10 +1,10 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import type { ModelConfig } from '../../domain/assistant/value-objects/ModelConfig'
 import { resolveAppStorage } from '../storage/resolveAppStorage'
+import { atomicWriteFile } from '../storage/atomicWriteFile'
 
 export async function writeModelConfig(config: ModelConfig): Promise<void> {
   const storage = await resolveAppStorage()
-  await mkdir(storage.dataRoot, { recursive: true })
 
   let existing: Record<string, unknown> = {}
   try {
@@ -25,5 +25,5 @@ export async function writeModelConfig(config: ModelConfig): Promise<void> {
     timeoutMs: config.timeoutMs,
   }
 
-  await writeFile(storage.configPath, JSON.stringify(existing, null, 2) + '\n', 'utf-8')
+  await atomicWriteFile(storage.configPath, JSON.stringify(existing, null, 2) + '\n')
 }

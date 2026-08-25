@@ -3,6 +3,8 @@ import { toolFailure, toolSuccess, type ToolHandler } from './ToolHandler'
 
 const MAX_FETCH_CHARS = 20_000
 const FETCH_TIMEOUT_MS = 20_000
+/** 下载体积硬上限（字节）。无 content-length 时按流式累计强制截断，防止超大响应占满内存。 */
+const MAX_FETCH_BYTES = 2 * 1024 * 1024
 
 /** Fetch text-based web content from a URL. */
 export const handleWebFetch: ToolHandler = async (request) => {
@@ -40,7 +42,49 @@ export const handleWebFetch: ToolHandler = async (request) => {
     }
 
     const contentType = response.headers.get('content-type') ?? ''
-    const body = await response.text()
+
+    // 体积上限：声明的 content-length 超限直接拒绝；
+    // 没有头（chunked/流式）则边读边累计，超限即中止下载。
+    let body: string
+    const declaredLength = Number(response.headers.get('content-length') ?? '')
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_FETCH_BYTES) {
+      return toolFailure(
+        request.toolId,
+        `Response too large: ${declaredLength} bytes exceeds the ${MAX_FETCH_BYTES} byte limit — ${url}`,
+      )
+    }
+
+    if (response.body) {
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      const chunks: string[] = []
+      let received = 0
+      let truncated = false
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        received += value.byteLength
+        if (received > MAX_FETCH_BYTES) {
+          await reader.cancel().catch(() => {})
+          truncated = true
+          break
+        }
+        chunks.push(decoder.decode(value, { stream: true }))
+      }
+      chunks.push(decoder.decode())
+      body = chunks.join('')
+      if (truncated) {
+        body = `${body}\n\n[download truncated at ${MAX_FETCH_BYTES} bytes]`
+      }
+    } else {
+      body = await response.text()
+      if (body.length > MAX_FETCH_BYTES) {
+        return toolFailure(
+          request.toolId,
+          `Response too large: ${body.length} bytes exceeds the ${MAX_FETCH_BYTES} byte limit — ${url}`,
+        )
+      }
+    }
 
     // Strip HTML to text for readability
     let text: string

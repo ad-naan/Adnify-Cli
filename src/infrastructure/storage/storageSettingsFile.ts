@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { atomicWriteFile } from './atomicWriteFile'
 import type { RuntimeBudgetPatch } from '../../application/ports/RuntimeBudgetPort'
 
 export interface StorageSettingsFile {
@@ -8,6 +8,8 @@ export interface StorageSettingsFile {
   animationLevel?: 'off' | 'minimal' | 'full'
   permissionMode?: 'manual' | 'workspace' | 'auto' | 'plan'
   runtimeBudget?: RuntimeBudgetPatch
+  /** 用户扩展的 shell 命令白名单（仅命令名）。这些命令按 careful 处理，执行仍需审批。 */
+  shellAllowlist?: string[]
 }
 
 export async function readStorageSettingsFile(path: string): Promise<StorageSettingsFile> {
@@ -23,6 +25,5 @@ export async function writeStorageSettingsFile(
   path: string,
   settings: StorageSettingsFile,
 ): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(settings, null, 2) + '\n', 'utf8')
+  await atomicWriteFile(path, JSON.stringify(settings, null, 2) + '\n')
 }

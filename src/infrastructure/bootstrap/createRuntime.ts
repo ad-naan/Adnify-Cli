@@ -37,6 +37,7 @@ import { McpRegistry } from '../mcp/McpClient'
 import { DefaultHookRegistry } from '../hooks/DefaultHookRegistry'
 import { resolveUiPreferences } from './resolveUiPreferences'
 import { readStorageSettingsFile } from '../storage/storageSettingsFile'
+import { extendShellCommandAllowlist } from '../tooling/classifyShellCommand'
 import { TsLanguageServiceIndexer } from '../indexing/TsLanguageServiceIndexer'
 import { TsDiagnosticsProvider } from '../diagnostics/TsDiagnosticsProvider'
 import { GraphRepoMapBuilder } from '../indexing/GraphRepoMapBuilder'
@@ -50,6 +51,7 @@ export async function createRuntime(): Promise<AdnifyCliRuntime> {
   const logger = new ConsoleLogger()
   const storage = await resolveAppStorage()
   const startupSettings = await readStorageSettingsFile(storage.settingsPath)
+  extendShellCommandAllowlist(startupSettings.shellAllowlist)
   const i18n = createAppI18n(resolveAppLocaleFromEnv(process.env, startupSettings.locale))
   const ui = resolveUiPreferences(
     process.env,

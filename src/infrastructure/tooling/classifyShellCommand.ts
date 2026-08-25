@@ -85,6 +85,29 @@ const ALLOWED_NPM_SCRIPTS = new Set([
 ])
 
 /**
+ * 用户通过 settings.json 的 `shellAllowlist` 扩展的命令。
+ * 模块级集合：classifyShellCommand 的两个调用方（executor 审批流、
+ * responder 的 plan 模式拦截）都需要同一份判定，逐个传参接线成本远大于收益。
+ * 启动时由 createRuntime 注入一次；运行期改 settings 需重启生效。
+ */
+const userAllowlistCommands = new Set<string>()
+
+/**
+ * 整体替换用户扩展的命令白名单（仅命令名，不含参数）。
+ * 传入非数组时不做任何事；传入数组（含空数组）则清空旧值后写入新值。
+ */
+export function extendShellCommandAllowlist(commands: unknown): void {
+  if (!Array.isArray(commands)) return
+  userAllowlistCommands.clear()
+  for (const entry of commands) {
+    if (typeof entry === 'string') {
+      const name = entry.trim().toLowerCase()
+      if (name) userAllowlistCommands.add(name)
+    }
+  }
+}
+
+/**
  * 判定一条命令是否允许执行，并给出风险级别。
  * 只读检索类为 safe，可直接放行；会跑构建/测试的命令为 careful，需要用户审批。
  * 会修改 git 状态的命令（add/commit/stash）也为 careful。
@@ -138,10 +161,25 @@ export function classifyShellCommand(argv: string[]): ShellCommandClassification
     }
   }
 
+  // 用户扩展命令：既然用户主动写进了 settings.json，说明信任该命令本身，
+  // 但参数任意、行为未知，一律按 careful 走审批，不给 safe。
+  if (userAllowlistCommands.has(command)) {
+    return {
+      ok: true,
+      riskLevel: 'careful',
+      summary,
+      effect: {
+        action: `Run user-allowlisted command "${command}"`,
+        writes: ['Unknown — depends on arguments'],
+        cautions: ['Command allowlisted via settings.json; behaviour not classified.'],
+      },
+    }
+  }
+
   return {
     ok: false,
     reason:
-      'Command is not allowed. Supported: rg/grep/find, cat/head/tail/wc, git (read-only + add/commit/stash/checkout/reset/restore with approval), bun test/run/x, npm/pnpm/yarn run <script>, npx <pkg>, tsc.',
+      'Command is not allowed. Supported: rg/grep/find, cat/head/tail/wc, git (read-only + add/commit/stash/checkout/reset/restore with approval), bun test/run/x, npm/pnpm/yarn run <script>, npx <pkg>, tsc. Add more via "shellAllowlist" in settings.json.',
   }
 }
 

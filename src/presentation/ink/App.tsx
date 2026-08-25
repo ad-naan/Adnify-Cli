@@ -221,9 +221,14 @@ export function App(props: AppProps) {
   useInput(handleInput)
   usePaste(controller.handlePaste, { isActive: !isTranscriptView && !isToolBrowseMode })
 
+  // 留出终端最后一行，让每帧输出高度 < 终端行数：
+  // ink 7 在 Windows 上对「全屏帧」强制整屏清空重画（ink#969），而高度
+  // 不足一屏时走 eraseLines 增量擦除路径，动画再多也只是局部刷新，不闪。
+  const shellHeight = Math.max(4, rows - 1)
+
   if (controller.isBooting) {
     return (
-      <Box width="100%" height={rows} flexDirection="column" paddingX={1}>
+      <Box width="100%" height={shellHeight} flexDirection="column" paddingX={1}>
         <HeaderBar
           appName="Adnify-Cli"
           author="adnaan"
@@ -266,7 +271,7 @@ export function App(props: AppProps) {
   const contextPercent = Math.min(999, Math.round((approxTokens / Math.max(1, contextWindowTokens)) * 100))
 
   return (
-    <Box width="100%" height={rows} flexDirection="column" paddingX={1} overflow="hidden">
+    <Box width="100%" height={shellHeight} flexDirection="column" paddingX={1} overflow="hidden">
       {isTranscriptView ? (
         <Box ref={conversationRegionRef} width="100%" flexGrow={1} minHeight={2} overflow="hidden">
           <ConversationViewport

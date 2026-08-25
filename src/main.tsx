@@ -19,4 +19,12 @@ async function main() {
   })
 }
 
-void main()
+// 启动阶段（Ink 渲染之前）抛出的异常没有任何 UI 可以承接，
+// 不兜底就是一个 unhandled rejection，Windows 下甚至可能静默退出。
+void main().catch((error) => {
+  const detail = error instanceof Error
+    ? `${error.message}\n${error.stack ?? ''}`
+    : String(error)
+  process.stderr.write(`Adnify CLI failed to start:\n${detail}\n`)
+  process.exitCode = 1
+})
