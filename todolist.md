@@ -84,12 +84,16 @@
 - [x] 文件级检查点（`:restore`），独立于 git 检查点
 - [x] 写入 diff 预览与命令风险展开
 - [x] 工具执行超时改为可暂停的 deadline，审批等待不再计入耗时
+- [x] 新增 TypeScript 诊断提供者：文件写入后自动跑 tsc 诊断并回传（write-after diagnostics）
+- [x] `file-ops` `update` 引入 fuzzyMatch 容错匹配（近似命中提示，含 75+152 行实现与测试）
+- [x] 新增 `todo-write` 工具与持久 TUI 待办面板（TodoDock，全量替换式清单、单 in_progress 约束、i18n）
+- [x] MCP 接入：`McpClient`/`McpRegistry`（stdio 子进程），config.json `mcpServers` 配置，`mcp__<server>__<tool>` 路由与 `:mcp` 查看
 
 ### 待继续
 
 - [ ] 考虑把 `file-ops` 进一步扩展为更结构化的 patch 方案
 - [ ] 继续提升模型选择工具与组合工具的稳定性
-- [ ] 子代理仍不能执行测试或修改文件；未来若增加写入型 worker，需先设计独立工作树和审批汇合点
+- [x] 写入型 worker：`implement` 角色已在 disposable git worktree 中修改与验证，patch 回传主代理审批落盘（其余角色保持只读）
 - [ ] 补更完整的产品化 README 展示内容与截图
 
 ---
@@ -131,7 +135,7 @@
 
 1. M2 已收口，审批边界已落地。
 2. 继续打磨终端 UI、会话区、sessions 展示与动效稳定性。
-3. 最后将更细粒度权限、记忆、插件等能力并入更完整的 M3。
+3. 更细粒度权限、记忆、MCP（插件雏形）均已落地；M3 收口前剩余重点：结构化 patch、写入型 worker、产品化 README。
 
 ---
 
@@ -151,8 +155,8 @@
 
 ### 对开发者 A
 
-- 审批闸门已落地，下一步是更细粒度的权限规则（按路径 / 按命令持久化）
-- 在现有 `file-ops` 能力稳定后，再考虑更复杂的补丁协议
+- 细粒度权限规则（按路径 / 按命令持久化）与 write-after 诊断闭环均已落地
+- 下一步：`file-ops` 结构化 patch 协议、写入型 worker（独立工作树 + 审批汇合）
 
 ### 对开发者 B
 
@@ -170,6 +174,16 @@
 ---
 
 ## 最近更新
+
+### 2026-08-21
+
+**v0.1.1 与收口合并（PR #7/#8/#9）**
+
+- `TsDiagnosticsProvider` + `DiagnosticsPort`：工具写文件后立即执行 TypeScript 诊断，错误回传给模型形成自动修复闭环（192 行实现 + 集成测试）
+- `fuzzyMatch`：`file-ops update` 精确匹配失败时的容错匹配层，近似命中给模型可解释提示
+- `todo-write` 工具 + `TodoDock` 持久待办面板：模型全量替换式清单刷新，状态约束（pending/in_progress/completed，最多一个 in_progress），清单保留到任务结束后下一轮开始
+- 会话视窗（ConversationViewport）与 useCliController 渲染消息转录重构
+- 当前测试基线：上次本地记录 263 pass（2026-08-11），此后新增约 20+ 用例；本地缺 bun/mise 环境，以 CI（GitHub Actions `bun run verify`）为准
 
 ### 2026-08-11
 
