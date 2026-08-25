@@ -177,6 +177,11 @@
 
 ### 2026-08-25
 
+**v0.1.1 发版收口**
+
+- 版本号升至 `0.1.1`，CHANGELOG 归档 `0.1.1 - 2026-08-25`（multi-patch、未知工具自纠、Windows UTF-8 控制台、sessions CJK 截断、渲染回归修复、存储文档）
+- README 双语里程碑表：M3 标记 ✅ 已完成，并补记收口范围（原子 multi-patch、写入后诊断、待办面板、存储文档）
+
 **剩余待办清零（M3 收口轮）**
 
 - `file-ops` 新增 `multi-patch` 动作：多 hunk 原子替换。所有 hunk 在内存中依次验证并应用，任一失败整批拒绝、磁盘不变；全部成功才写盘一次。单 hunk 语义与 `update` 完全一致（精确命中 → expectedCount 校验 → 空白容错回退），支持 per-hunk `replaceAll`/`expectedCount`，上限 20 hunk。schema、prompt 文档、4 个新测试同步更新

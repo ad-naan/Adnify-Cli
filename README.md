@@ -327,7 +327,7 @@ The repository includes a `.rules/` directory to constrain collaboration methods
 |---|---|---|
 | **M1** | Session persistence and startup recovery | ✅ Complete |
 | **M2** | Tool calling and Agent capabilities (8 built-in tools + MCP + 20-round Agent loop) | ✅ Complete |
-| **M3** | Approval / Permissions / UI polish and productization | 🔨 In Progress |
+| **M3** | Approval / Permissions / UI polish and productization (atomic multi-patch, write-after diagnostics, todo dock, storage docs) | ✅ Complete |
 
 ---
 
