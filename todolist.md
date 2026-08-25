@@ -13,7 +13,7 @@
 |------|------|----------|
 | M1 | 会话可持久化到本地，退出重开后可恢复工作区最近会话 | 已完成 |
 | M2 | 模型可调用工具，工具过程与结果可回到会话流中 | 已完成 |
-| M3 | 多轮工具协作、权限控制、稳定 UI 与完整协作链路 | 核心能力已落地，持续增强中 |
+| M3 | 多轮工具协作、权限控制、稳定 UI 与完整协作链路 | 已完成（2026-08-25 收口） |
 
 ---
 
@@ -91,10 +91,10 @@
 
 ### 待继续
 
-- [ ] 考虑把 `file-ops` 进一步扩展为更结构化的 patch 方案
-- [ ] 继续提升模型选择工具与组合工具的稳定性
+- [x] 考虑把 `file-ops` 进一步扩展为更结构化的 patch 方案（`multi-patch`：多 hunk 原子替换，任一失败整批拒绝）
+- [x] 继续提升模型选择工具与组合工具的稳定性（未知工具报错回显可用清单，助模型一轮自纠）
 - [x] 写入型 worker：`implement` 角色已在 disposable git worktree 中修改与验证，patch 回传主代理审批落盘（其余角色保持只读）
-- [ ] 补更完整的产品化 README 展示内容与截图
+- [x] 补更完整的产品化 README 展示内容与截图（补 multi-patch / write-after diagnostics / TodoDock 能力项，双语）
 
 ---
 
@@ -123,11 +123,11 @@
 
 ### 待继续
 
-- [ ] 继续清理终端中个别文本的编码与展示细节
-- [ ] 再优化 `sessions` 展示逻辑，使其更贴近目标交互
-- [ ] 做一轮终端渲染稳定性回归检查
-- [ ] 补更完整的产品化 README 展示内容与截图
-- [ ] 视情况补一份存储与配置专题文档
+- [x] 继续清理终端中个别文本的编码与展示细节（启动时对齐 Windows 控制台 UTF-8 代码页 + 会话标题按可见列宽截断）
+- [x] 再优化 `sessions` 展示逻辑，使其更贴近目标交互（CJK 安全截断、当前会话标注）
+- [x] 做一轮终端渲染稳定性回归检查（修复 8 个因 ANSI 色码导致的环境相关断言失败，统一走 stripTerminalAnsi）
+- [x] 补更完整的产品化 README 展示内容与截图（补 multi-patch / write-after diagnostics / TodoDock 能力项，双语）
+- [x] 视情况补一份存储与配置专题文档（docs/storage-configuration.md + zh-CN 双语）
 
 ---
 
@@ -169,11 +169,23 @@
 
 - [x] M1
 - [x] M2
-- [ ] M3
+- [x] M3
 
 ---
 
 ## 最近更新
+
+### 2026-08-25
+
+**剩余待办清零（M3 收口轮）**
+
+- `file-ops` 新增 `multi-patch` 动作：多 hunk 原子替换。所有 hunk 在内存中依次验证并应用，任一失败整批拒绝、磁盘不变；全部成功才写盘一次。单 hunk 语义与 `update` 完全一致（精确命中 → expectedCount 校验 → 空白容错回退），支持 per-hunk `replaceAll`/`expectedCount`，上限 20 hunk。schema、prompt 文档、4 个新测试同步更新
+- 未知工具报错从「not implemented yet」改为回显真实可用工具清单（含 MCP 前缀提示）——模型幻觉工具名时一轮即可自纠，省掉整轮无效往返
+- Windows 终端编码对齐：启动时把 stdin/stdout/stderr 与控制台代码页切到 UTF-8（65001），中文/emoji 不再因 GBK 代码页乱码；任何失败静默降级，不阻断启动
+- `:sessions` / `:resume` 候选行标题按可见列宽截断（CJK 计 2 列），当前会话加 `(current)` 标注，窄终端不再顶破表格
+- 终端渲染回归修复：8 个既有失败测试（ConversationViewport ×5、ChoiceTabs ×2、TaskDock ×1）根因是环境带 TTY 颜色时 `renderToString` 输出 ANSI 色码、断言裸文本；统一改为 `stripTerminalAnsi(renderToString(...))` 后全绿。ChoiceTabs 窗口断言 `↑ 4` 与组件「选中项居中」语义矛盾（6 项/窗口 5/选中 index 3 → `↑ 1`），修正断言
+- README 双语补记 multi-patch、write-after diagnostics、TodoDock 能力项；新增 `docs/storage-configuration.md`（双语）：数据目录结构、settings.json、数据根解析顺序（env > settings > default）、config.json 全字段、环境变量对照、隐私说明
+- 当前测试状态：`366 pass / 0 fail`（52 个文件）
 
 ### 2026-08-21
 

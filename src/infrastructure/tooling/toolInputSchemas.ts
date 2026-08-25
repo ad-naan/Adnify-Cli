@@ -62,8 +62,9 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
     properties: {
       action: {
         type: 'string',
-        enum: ['read', 'list', 'write', 'update', 'patch'],
-        description: 'Defaults to "read" when omitted. "update" and "patch" are equivalent.',
+        enum: ['read', 'list', 'write', 'update', 'patch', 'multi-patch'],
+        description:
+          'Defaults to "read" when omitted. "update" and "patch" are equivalent. "multi-patch" applies several replacements atomically.',
       },
       path: {
         type: 'string',
@@ -78,6 +79,31 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
         type: 'string',
         description: 'Replacement text. Required for "update"/"patch".',
       },
+      patches: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: 'object',
+          properties: {
+            oldText: { type: 'string', description: 'Exact text to replace. Cannot be empty.' },
+            newText: { type: 'string', description: 'Replacement text.' },
+            replaceAll: {
+              type: 'boolean',
+              description: 'Replace every occurrence of this hunk instead of exactly one.',
+            },
+            expectedCount: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Fail unless this hunk matches exactly this many times.',
+            },
+          },
+          required: ['oldText', 'newText'],
+          additionalProperties: false,
+        },
+        description:
+          'Required for "multi-patch". Applied in order; if any hunk fails, nothing is written (atomic).',
+      },
       replaceAll: {
         type: 'boolean',
         description: 'Replace every occurrence instead of requiring exactly one match.',
@@ -90,7 +116,7 @@ const TOOL_INPUT_SCHEMAS: Record<string, Record<string, unknown>> = {
       allowWrite: {
         type: 'boolean',
         description:
-          'Must be true for write/update/patch. Explicit acknowledgement that this modifies a file.',
+          'Must be true for write/update/patch/multi-patch. Explicit acknowledgement that this modifies a file.',
       },
     },
     required: ['action'],

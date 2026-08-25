@@ -63,7 +63,23 @@ import { MutableRuntimeBudget } from '../runtime/MutableRuntimeBudget'
  * 等用户审批的那段不算 —— 详见 ToolExecutionDeadline。
  */
 /** file-ops 中会改动磁盘的动作 —— 只有这些需要事前快照。 */
-const MUTATING_FILE_OPS = new Set(['write', 'update', 'patch'])
+const MUTATING_FILE_OPS = new Set(['write', 'update', 'patch', 'multi-patch'])
+
+/** 内置可执行工具清单 —— 未知工具报错时回显给模型，帮它自纠而不是瞎猜。 */
+const BUILTIN_TOOL_IDS = [
+  'workspace-read',
+  'search-index',
+  'glob-search',
+  'file-ops',
+  'shell-runner',
+  'web-search',
+  'web-fetch',
+  'task',
+  'ask-user',
+  'runtime-control',
+  'plan-document',
+  'todo-write',
+] as const
 
 export class LocalToolExecutor implements ToolExecutorPort {
   constructor(
@@ -168,8 +184,18 @@ export class LocalToolExecutor implements ToolExecutorPort {
         return handlePlanDocument(request)
       case 'todo-write':
         return handleTodoWrite(request)
-      default:
-        return toolFailure(request.toolId, `Tool "${request.toolId}" is not implemented yet.`)
+      default: {
+        // 模型偶尔会幻觉出不存在的工具名(常见:把 MCP 命名风格用到内置工具上,
+        // 或沿用旧版工具名)。报错时附上真实可用清单,把一次注定失败的猜测
+        // 变成一次可自纠的重试,省掉一整轮无效往返。
+        const mcpHint = this.mcpRegistry
+          ? ' (mcp__<server>__<tool> for external MCP tools)'
+          : ''
+        return toolFailure(
+          request.toolId,
+          `Unknown tool "${request.toolId}". Available tools:${mcpHint} ${BUILTIN_TOOL_IDS.join(', ')}.`,
+        )
+      }
     }
   }
 

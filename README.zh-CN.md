@@ -8,7 +8,7 @@
 
 本地运行，数据不出你的机器。支持 OpenAI / Anthropic / Google / 任意 OpenAI 兼容接口，不绑定任何平台。
 
-[📚 English Documentation](./README.md)
+[📚 English Documentation](./README.md) · [🗄️ Storage & Configuration](./docs/storage-configuration.md) · [🗄️ 存储与配置](./docs/storage-configuration.zh-CN.md)
 
 [快速开始](#-快速开始) · [为什么选 Adnify-Cli](#-为什么选-adnify-cli) · [工具与审批](#️-工具与审批) · [配置](#-配置) · [架构](#-架构)
 
@@ -51,6 +51,9 @@
 - **会话持久化** — 每个工作区独立保存，启动自动恢复上次会话，关了终端不丢上下文
 - **工具调用闭环** — 8 个内置工具 + 动态 MCP 工具，过程与结果实时回流会话区
 - **并行研究子代理** — `explore` / `review` / `test` / `general` 专职角色，隔离上下文并安全使用只读代码工具
+- **写入后即时诊断** — TypeScript 错误在文件落盘当刻即被捕获并回传模型，同一轮对话内自动修复
+- **容错补丁匹配** — `oldText` 精确匹配失败时自动回退空白/缩进容错定位，不再盲目失败；歧义命中依然拒绝
+- **实时待办面板** — 模型通过 `todo-write` 维护持久进度清单，当前项、完成态、剩余步骤始终可见
 - **项目指令自动加载** — 支持 `.adnify/instructions.md`、`AGENTS.md` 与排序后的 `.rules/*.md`
 - **风险分级审批** — 写文件和执行命令前暂停等待用户确认，模型说了不算，你说了算
 - **跨会话项目记忆** — `:memory` 保存项目知识，后续会话自动注入
@@ -86,7 +89,7 @@
 | `workspace-read` | 读取工作区摘要 | 🟢 safe |
 | `search-index` | 基于 ripgrep 的代码检索（无 rg 时回退到内置扫描） | 🟢 safe |
 | `glob-search` | 基于通配符的文件匹配 | 🟢 safe |
-| `file-ops` | `read` / `list` / `write` / `update` / `patch` | 🟢 读取 safe · 🟡 写入 careful |
+| `file-ops` | `read` / `list` / `write` / `update` / `patch` / `multi-patch`(原子多段替换) | 🟢 读取 safe · 🟡 写入 careful |
 | `shell-runner` | 白名单命令执行 | 🟢 只读 safe · 🟡 验证类 careful |
 | `web-search` | 基于 DuckDuckGo 的公开网络搜索（无需 API key） | 🟡 careful |
 | `web-fetch` | 获取并提取 URL 页面的文本内容 | 🟡 careful |

@@ -45,11 +45,18 @@ describe('toolInputSchemas', () => {
   })
 
   it('enumerates exactly the file-ops actions runFileOps dispatches on', () => {
-    // runFileOps 的 switch：read / list / write / update / patch，其余走 default 报错。
+    // runFileOps 的 switch：read / list / write / update / patch / multi-patch，其余走 default 报错。
     const schema = getToolInputSchema('file-ops') as {
       properties: { action: { enum: string[] } }
     }
-    expect(schema.properties.action.enum).toEqual(['read', 'list', 'write', 'update', 'patch'])
+    expect(schema.properties.action.enum).toEqual([
+      'read',
+      'list',
+      'write',
+      'update',
+      'patch',
+      'multi-patch',
+    ])
   })
 
   it('documents allowWrite, which every mutating file-ops action rejects without', () => {

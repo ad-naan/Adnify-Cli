@@ -34,6 +34,106 @@ async function patch(root: string, payload: Record<string, unknown>) {
   return runFileOps(parsed.value)
 }
 
+describe('fileOpsHandler multi-patch (atomic hunks)', () => {
+  test('applies all hunks when every match succeeds', async () => {
+    await withWorkspace(async (root) => {
+      const file = join(root, 'multi.ts')
+      await writeFile(
+        file,
+        'const alpha = 1\nconst beta = 2\nconst gamma = 3\n',
+        'utf8',
+      )
+
+      const result = await patch(root, {
+        action: 'multi-patch',
+        path: 'multi.ts',
+        patches: [
+          { oldText: 'const alpha = 1', newText: 'const alpha = 10' },
+          { oldText: 'const gamma = 3', newText: 'const gamma = 30' },
+        ],
+        allowWrite: true,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.content).toContain('Hunks applied: 2 (atomic')
+      expect(await readFile(file, 'utf8')).toBe(
+        'const alpha = 10\nconst beta = 2\nconst gamma = 30\n',
+      )
+    })
+  })
+
+  test('writes nothing when a later hunk fails (atomicity)', async () => {
+    await withWorkspace(async (root) => {
+      const file = join(root, 'atomic.ts')
+      const original = 'const a = 1\nconst b = 2\n'
+      await writeFile(file, original, 'utf8')
+
+      const result = await patch(root, {
+        action: 'multi-patch',
+        path: 'atomic.ts',
+        patches: [
+          { oldText: 'const a = 1', newText: 'const a = 99' },
+          { oldText: 'const missing = 0', newText: 'const missing = 9' },
+        ],
+        allowWrite: true,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.content).toContain('Atomic rejection')
+      expect(result.content).toContain('patches[1] failed')
+      // 磁盘内容不变:第一个 hunk 也不应被写入
+      expect(await readFile(file, 'utf8')).toBe(original)
+    })
+  })
+
+  test('rejects empty patches array and missing allowWrite', async () => {
+    await withWorkspace(async (root) => {
+      const file = join(root, 'guard.ts')
+      await writeFile(file, 'x\n', 'utf8')
+
+      const noAck = await patch(root, {
+        action: 'multi-patch',
+        path: 'guard.ts',
+        patches: [{ oldText: 'x', newText: 'y' }],
+      })
+      expect(noAck.ok).toBe(false)
+      expect(noAck.content).toContain('allowWrite')
+
+      const empty = await patch(root, {
+        action: 'multi-patch',
+        path: 'guard.ts',
+        patches: [],
+        allowWrite: true,
+      })
+      expect(empty.ok).toBe(false)
+      expect(empty.content).toContain('"patches"')
+    })
+  })
+
+  test('per-hunk replaceAll and tolerant fallback still work inside multi-patch', async () => {
+    await withWorkspace(async (root) => {
+      const file = join(root, 'mixed.ts')
+      await writeFile(file, 'const a = 1   \nlog(a)\nlog(a)\n', 'utf8')
+
+      const result = await patch(root, {
+        action: 'multi-patch',
+        path: 'mixed.ts',
+        patches: [
+          { oldText: 'log(a)', newText: 'log(b)', replaceAll: true, expectedCount: 2 },
+          // 容错匹配的 span 不含行尾换行:newText 别带 \n,否则会多出一个空行
+          { oldText: 'const a = 1\n', newText: 'const a = 2' }, // trailing spaces → tolerant
+        ],
+        allowWrite: true,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.content).toContain('trailing-whitespace tolerance')
+      expect(result.content).toContain('replaced 2 occurrence(s)')
+      expect(await readFile(file, 'utf8')).toBe('const a = 2\nlog(b)\nlog(b)\n')
+    })
+  })
+})
+
 describe('fileOpsHandler tolerant patch', () => {
   test('exact match still wins without a tolerance note', async () => {
     await withWorkspace(async (root) => {

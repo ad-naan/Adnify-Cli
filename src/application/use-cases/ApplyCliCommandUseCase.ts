@@ -1584,6 +1584,65 @@ function formatShortSessionId(sessionId: string): string {
   return sessionId.slice(0, 8)
 }
 
+/** 会话标题的可见列宽预算:序号/标记/id/mode/msgs/时间占用后的余量。 */
+const SESSION_TITLE_COLUMN_BUDGET = 36
+
+/**
+ * 单字符的终端占列数:CJK/全角/emoji 记 2,组合符与零宽字符记 0。
+ * 与 presentation/ink/terminalText.ts 的实现语义一致;这里内联一份,
+ * 避免 application 层反向依赖 presentation 层。
+ */
+function sessionTitleCharacterWidth(character: string): number {
+  if (character === '\t') return 2
+
+  const codePoint = character.codePointAt(0)
+  if (codePoint === undefined) return 0
+  if (
+    codePoint < 0x20 ||
+    (codePoint >= 0x7f && codePoint < 0xa0) ||
+    codePoint === 0x200d ||
+    (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+  ) {
+    return 0
+  }
+  if (
+    (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+    (codePoint >= 0x1f300 && codePoint <= 0x1f64f) ||
+    (codePoint >= 0x1f900 && codePoint <= 0x1f9ff)
+  ) {
+    return 2
+  }
+  return 1
+}
+
+/**
+ * 按可见宽度截断标题(尾随 …),CJK 计 2 列。
+ *
+ * 会话标题来自首条用户消息,中文标题在窄终端会顶破表格;按码点切会在
+ * 全角字符中间下刀,渲染成半个乱码。按可见列预算截断才能对齐且不破字。
+ */
+function truncateSessionTitleByWidth(title: string, budget: number): string {
+  let width = 0
+  let cut = title.length
+  let previousCodePoints = 0
+  for (const character of title) {
+    const characterWidth = sessionTitleCharacterWidth(character)
+    if (width + characterWidth > budget) {
+      cut = previousCodePoints
+      break
+    }
+    width += characterWidth
+    previousCodePoints += character.length
+  }
+
+  const visible = title.slice(0, cut)
+  return cut < title.length ? `${visible}…` : visible
+}
+
 function formatSessionLine(
   session: ConversationSession,
   index: number,
@@ -1593,7 +1652,12 @@ function formatSessionLine(
   const updatedAt = session.updatedAt.toISOString().replace('T', ' ').slice(5, 16)
   const messageCount = `${session.getMessages().length}m`
 
-  return `${index + 1}. ${marker} [${formatShortSessionId(session.id)}]  ${session.mode.padEnd(5, ' ')}  ${messageCount.padStart(4, ' ')}  ${updatedAt}  ${session.title}`
+  const title = truncateSessionTitleByWidth(
+    session.title ?? '',
+    SESSION_TITLE_COLUMN_BUDGET,
+  )
+
+  return `${index + 1}. ${marker} [${formatShortSessionId(session.id)}]  ${session.mode.padEnd(5, ' ')}  ${messageCount.padStart(4, ' ')}  ${updatedAt}  ${title}`
 }
 
 type ResumeMatchResult =
@@ -1683,7 +1747,9 @@ function formatResumeCandidateLine(
   i18n: AppI18n,
 ): string {
   const marker = session.id === currentSessionId ? '>' : '-'
-  return `${index}. ${marker} [${formatShortSessionId(session.id)}] ${session.title} (${session.mode})`
+  const currentLabel = marker === '>' ? ` (${i18n.t('cli.sessions.current')})` : ''
+  const title = truncateSessionTitleByWidth(session.title ?? '', SESSION_TITLE_COLUMN_BUDGET)
+  return `${index}. ${marker} [${formatShortSessionId(session.id)}] ${title} (${session.mode})${currentLabel}`
 }
 
 function formatStorageSnapshot(snapshot: StorageSettingsSnapshot, i18n: AppI18n): string {

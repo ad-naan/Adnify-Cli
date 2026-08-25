@@ -210,7 +210,6 @@ export class AiSdkGateway implements ModelGatewayPort {
         model: this.model,
         system,
         messages: messages.map(toAiModelMessage),
-        allowSystemInMessages: false,
         maxRetries: 0,
         // The gateway owns retries and status reporting; SDK's default handler writes into Ink.
         onError: () => {},

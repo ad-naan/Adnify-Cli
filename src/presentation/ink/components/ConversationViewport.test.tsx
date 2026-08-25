@@ -4,6 +4,12 @@ import { createAppI18n } from '../../../application/i18n/AppI18n'
 import { createCliCommandOutputContent, createCliNoticeContent } from '../../../application/support/CliTranscriptMarkup'
 import { ConversationMessage } from '../../../domain/session/entities/ConversationMessage'
 import { ConversationViewport } from './ConversationViewport'
+import { stripTerminalAnsi } from '../terminalText'
+
+// 环境带 TTY 颜色支持时 renderToString 会输出 ANSI 色码;断言一律针对纯文本。
+function renderPlainText(node: React.ReactNode, options?: { columns: number }): string {
+  return stripTerminalAnsi(renderToString(node, options))
+}
 
 const i18n = createAppI18n('en')
 const toolMessage = new ConversationMessage({
@@ -24,7 +30,7 @@ describe('ConversationViewport detail levels', () => {
       createdAt: new Date('2026-08-10T00:00:00.000Z'),
       content: 'please inspect the repository',
     })
-    const output = renderToString(
+    const output = renderPlainText(
       <ConversationViewport messages={[userMessage]} busy viewportRows={12} i18n={i18n} />,
       { columns: 80 },
     )
@@ -34,7 +40,7 @@ describe('ConversationViewport detail levels', () => {
   })
 
   test('collapses verbose tool output in the regular conversation', () => {
-    const output = renderToString(
+    const output = renderPlainText(
       <ConversationViewport messages={[toolMessage]} viewportRows={12} i18n={i18n} />,
       { columns: 80 },
     )
@@ -46,7 +52,7 @@ describe('ConversationViewport detail levels', () => {
   })
 
   test('shows complete tool output in transcript mode', () => {
-    const output = renderToString(
+    const output = renderPlainText(
       <ConversationViewport
         messages={[toolMessage]}
         viewportRows={12}
@@ -72,11 +78,11 @@ describe('ConversationViewport detail levels', () => {
       ),
     })
 
-    const compact = renderToString(
+    const compact = renderPlainText(
       <ConversationViewport messages={[call]} viewportRows={12} i18n={i18n} />,
       { columns: 80 },
     )
-    const expanded = renderToString(
+    const expanded = renderPlainText(
       <ConversationViewport messages={[call]} viewportRows={12} expandedDetails i18n={i18n} />,
       { columns: 80 },
     )
@@ -97,7 +103,7 @@ describe('ConversationViewport detail levels', () => {
       ),
     })
 
-    const output = renderToString(
+    const output = renderPlainText(
       <ConversationViewport
         messages={[toolMessage, secondTool]}
         viewportRows={20}
@@ -121,7 +127,7 @@ describe('ConversationViewport detail levels', () => {
       createdAt: new Date('2026-08-10T00:00:00.000Z'),
       content: 'First line\nSecond line',
     })
-    const output = renderToString(
+    const output = renderPlainText(
       <ConversationViewport messages={[assistant]} viewportRows={6} i18n={i18n} />,
       { columns: 80 },
     )
@@ -137,7 +143,7 @@ describe('ConversationViewport detail levels', () => {
       id: 'call', role: 'system', createdAt: new Date(),
       content: createCliNoticeContent('tool: shell-runner\ninput: {}', { title: 'tools · shell-runner', tone: 'info' }),
     })
-    const output = renderToString(
+    const output = renderPlainText(
       <ConversationViewport messages={[call, toolMessage]} viewportRows={8} i18n={i18n} />,
       { columns: 80 },
     )
@@ -151,7 +157,7 @@ describe('ConversationViewport detail levels', () => {
       id: 'markdown', role: 'assistant', createdAt: new Date(),
       content: '## Project\n\nThis is **important**.\n\n> **Your terminal.**',
     })
-    const output = renderToString(
+    const output = renderPlainText(
       <ConversationViewport messages={[assistant]} viewportRows={10} i18n={i18n} />,
       { columns: 80 },
     )

@@ -8,7 +8,7 @@ An AI coding companion that runs in your terminal — not a chat box ported to t
 
 Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic, Google, Ollama, DeepSeek, or any OpenAI-compatible endpoint — no vendor lock-in.
 
-[📚 中文文档](./README.zh-CN.md)
+[📚 中文文档](./README.zh-CN.md) · [🗄️ Storage & Configuration](./docs/storage-configuration.md) · [🗄️ 存储与配置](./docs/storage-configuration.zh-CN.md)
 
 [Quick Start](#-quick-start) · [Why Adnify-Cli](#-why-adnify-cli) · [Tools & Approval](#️-tools--approval) · [Configuration](#-configuration) · [Architecture](#-architecture)
 
@@ -58,6 +58,9 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 - **AI Runtime Control** — the agent can inspect and adjust assistant mode, permission mode, language, animation, and configured models; capability increases still require keyboard approval
 - **Permission Modes** — `manual`, `workspace`, `auto`, and `plan`, with protected-path and out-of-workspace boundaries
 - **Verified Coding Loop** — Successful file edits trigger a required test, typecheck, lint, or build attempt before completion
+- **Write-After Diagnostics** — TypeScript errors are detected the moment a file is written and fed back to the model in the same turn for self-correction
+- **Tolerant Patch Matching** — When exact `oldText` matching fails, whitespace/indentation-tolerant fallback locates the right spot instead of failing blindly; ambiguous matches are still rejected
+- **Live Todo Dock** — The model maintains a persistent progress checklist via `todo-write`; the current item, completion state, and remaining steps are always visible
 - **Automatic Project Instructions** — Loads `.adnify/instructions.md`, `AGENTS.md`, and ordered `.rules/*.md`
 - **Risk-Tiered Approval** — Pauses before file writes and command execution — the model doesn't decide, you do
 - **Cross-Session Memory** — `:memory` stores project knowledge, auto-injected into future sessions
@@ -96,7 +99,7 @@ Runs locally. Your data never leaves your machine. Works with OpenAI, Anthropic,
 | `workspace-read` | Read workspace summary | 🟢 safe |
 | `search-index` | ripgrep-based code search (falls back to built-in scanner) | 🟢 safe |
 | `glob-search` | Glob-pattern file matching | 🟢 safe |
-| `file-ops` | `read` / `list` / `write` / `update` / `patch` | 🟢 read safe · 🟡 write careful |
+| `file-ops` | `read` / `list` / `write` / `update` / `patch` / `multi-patch` (atomic hunks) | 🟢 read safe · 🟡 write careful |
 | `shell-runner` | Whitelist command execution | 🟢 read-only safe · 🟡 verification careful |
 | `web-search` | DuckDuckGo public web search (no API key needed) | 🟡 careful |
 | `web-fetch` | Fetch and extract text from an HTTP(S) URL | 🟡 careful |

@@ -62,10 +62,12 @@ export async function runFileOps(input: FileOpsRequest): Promise<ToolExecutionRe
     case 'update':
     case 'patch':
       return patchFileAction(input)
+    case 'multi-patch':
+      return multiPatchAction(input)
     default:
       return toolFailure(
         input.request.toolId,
-        'Unsupported file-ops action. Supported: read, list, write, update, patch.',
+        'Unsupported file-ops action. Supported: read, list, write, update, patch, multi-patch.',
       )
   }
 }
@@ -271,6 +273,154 @@ async function patchFileAction(input: FileOpsRequest): Promise<ToolExecutionResu
     return toolFailure(request.toolId, describeError(error, 'Failed to update the file.'))
   }
 }
+
+/**
+ * 多 hunk 原子替换(multi-patch)。
+ *
+ * 设计目标:模型一次改多处时,不再被迫发 N 次 update、中途失败留下半成品状态。
+ * 所有 hunk 先在内存里依次验证并应用,任一失败则整批拒绝,磁盘内容不变;
+ * 全部成功才写盘一次 —— 要么全成,要么全不动。
+ */
+async function multiPatchAction(input: FileOpsRequest): Promise<ToolExecutionResult> {
+  const { prompt, request, resolvedPath } = input
+
+  if (prompt.allowWrite !== true) {
+    return toolFailure(
+      request.toolId,
+      'Patch access requires explicit confirmation in the payload. Use {"action":"multi-patch","path":"...","patches":[{"oldText":"...","newText":"..."}],"allowWrite":true}.',
+    )
+  }
+
+  const patches = Array.isArray(prompt.patches) ? prompt.patches : null
+  if (!patches || patches.length === 0) {
+    return toolFailure(
+      request.toolId,
+      'Missing required field "patches" (non-empty array) for file-ops multi-patch.',
+    )
+  }
+  if (patches.length > MAX_MULTI_PATCH_HUNKS) {
+    return toolFailure(
+      request.toolId,
+      `Too many patches in one multi-patch. Limit: ${MAX_MULTI_PATCH_HUNKS}.`,
+    )
+  }
+
+  const hunks: Array<{ oldText: string; newText: string; replaceAll: boolean; expectedCount?: number }> = []
+  for (let index = 0; index < patches.length; index += 1) {
+    const hunk = patches[index]
+    if (typeof hunk !== 'object' || hunk === null) {
+      return toolFailure(request.toolId, `patches[${index}] must be an object.`)
+    }
+    const record = hunk as Record<string, unknown>
+    const oldText = typeof record.oldText === 'string' ? record.oldText : null
+    const newText = typeof record.newText === 'string' ? record.newText : null
+    if (oldText === null || newText === null || !oldText) {
+      return toolFailure(
+        request.toolId,
+        `patches[${index}] requires non-empty "oldText" and string "newText".`,
+      )
+    }
+    hunks.push({
+      oldText,
+      newText,
+      replaceAll: record.replaceAll === true,
+      expectedCount: resolveExpectedCount(record.expectedCount, record.replaceAll === true),
+    })
+  }
+
+  if (!isLikelyTextPath(resolvedPath)) {
+    return toolFailure(request.toolId, 'Only text-like files can be patched in this build.')
+  }
+
+  try {
+    const fileInfo = await stat(resolvedPath)
+    if (!fileInfo.isFile()) {
+      return toolFailure(request.toolId, 'The requested path is not a file.')
+    }
+
+    let content = await readFile(resolvedPath, 'utf8')
+    const notes: string[] = []
+
+    // 逐 hunk 在内存中应用;序号从 1 开始,方便与模型提供的 patches 下标对应。
+    for (let index = 0; index < hunks.length; index += 1) {
+      const applied = applySingleHunk(content, hunks[index])
+      if (!applied.ok) {
+        return toolFailure(
+          request.toolId,
+          `Atomic rejection — nothing was written. patches[${index}] failed: ${applied.error}`,
+        )
+      }
+      content = applied.content
+      notes.push(applied.note ? `  #${index + 1}: ${applied.note}` : `  #${index + 1}: ok`)
+    }
+
+    if (content.length > MAX_FILE_WRITE_CHARS) {
+      return toolFailure(
+        request.toolId,
+        `Patched content is too large. Limit: ${MAX_FILE_WRITE_CHARS} characters.`,
+      )
+    }
+
+    await writeFile(resolvedPath, content, 'utf8')
+
+    return toolSuccess(
+      request.toolId,
+      [
+        `File updated: ${toRelativePath(request, resolvedPath)}`,
+        `Hunks applied: ${hunks.length} (atomic — all or nothing)`,
+        ...notes,
+      ].join('\n'),
+    )
+  } catch (error) {
+    return toolFailure(request.toolId, describeError(error, 'Failed to update the file.'))
+  }
+}
+
+/**
+ * 单个 hunk 的纯函数应用:精确命中 → expectedCount 校验 → 单点容错回退。
+ * 与 patchFileAction 的单 hunk 语义保持一致,但不接触磁盘。
+ */
+function applySingleHunk(
+  content: string,
+  hunk: { oldText: string; newText: string; replaceAll: boolean; expectedCount?: number },
+): { ok: true; content: string; note?: string } | { ok: false; error: string } {
+  const matchCount = countOccurrences(content, hunk.oldText)
+
+  if (matchCount === 0) {
+    if (hunk.replaceAll) {
+      return { ok: false, error: 'No matching content found.' }
+    }
+    const tolerant = tryTolerantReplacement(content, hunk.oldText, hunk.newText)
+    if (!tolerant) {
+      return { ok: false, error: 'No matching content found.' }
+    }
+    if (tolerant.matchCount > 1) {
+      return {
+        ok: false,
+        error: `No exact match found; ${tolerant.matchCount} whitespace-tolerant matches are ambiguous. Add more surrounding context to "oldText" to pin a single location.`,
+      }
+    }
+    return {
+      ok: true,
+      content: tolerant.content,
+      note: `matched via ${tolerant.strategy} tolerance; exact text not found`,
+    }
+  }
+
+  if (hunk.expectedCount !== undefined && matchCount !== hunk.expectedCount) {
+    return { ok: false, error: `Expected ${hunk.expectedCount} match(es), but found ${matchCount}.` }
+  }
+
+  return {
+    ok: true,
+    content: hunk.replaceAll
+      ? content.split(hunk.oldText).join(hunk.newText)
+      : replaceFirst(content, hunk.oldText, hunk.newText),
+    note: hunk.replaceAll ? `replaced ${matchCount} occurrence(s)` : undefined,
+  }
+}
+
+const MAX_MULTI_PATCH_HUNKS = 20
 
 function resolveExpectedCount(rawValue: unknown, replaceAll: boolean): number | undefined {
   if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
